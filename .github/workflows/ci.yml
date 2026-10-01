@@ -1,23 +1,31 @@
 name: Nexa CI
+
 on:
   push:
     branches: [master]
   pull_request:
     branches: [master]
+
 jobs:
   api:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
-        with: {python-version: "3.12"}
+        with:
+          python-version: "3.12"
       - run: pip install -r apps/api/requirements.txt
       - run: python -m compileall apps/api/app
+      - run: cd apps/api && pytest -q
+
   web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: "22", cache: npm, cache-dependency-path: apps/web/package.json}
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package.json
       - run: cd apps/web && npm install
       - run: cd apps/web && npm run build

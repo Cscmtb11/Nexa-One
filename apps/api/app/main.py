@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .db import Base, engine
 from .settings import settings
-from .routers import auth, organisations
+from .routers import auth, organisations, facilities
 
-app = FastAPI(title=settings.app_name, version="0.2.0")
+app = FastAPI(title=settings.app_name, version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,19 +16,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup():
-    # Development bootstrap only. Production will use versioned migrations.
     if settings.environment != "production":
         Base.metadata.create_all(bind=engine)
 
 @app.get("/health")
 def health():
-    return {
-        "service": "nexa-api",
-        "status": "ok",
-        "environment": settings.environment,
-        "ai_enabled": settings.ai_enabled,
-        "version": "0.2.0",
-    }
+    return {"service":"nexa-api","status":"ok","environment":settings.environment,"ai_enabled":settings.ai_enabled,"version":"0.3.0"}
 
 app.include_router(auth.router)
 app.include_router(organisations.router)
+app.include_router(facilities.router)

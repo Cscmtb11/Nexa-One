@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     jwt_issuer: str = "nexa"
     jwt_audience: str = "nexa-app"
-    jwt_secret: str = ""
+    jwt_secret: str = "CHANGE_ME_IN_PRODUCTION"
+    access_token_minutes: int = 30
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

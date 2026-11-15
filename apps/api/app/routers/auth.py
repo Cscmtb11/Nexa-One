@@ -56,7 +56,8 @@ def _seed_organisation_defaults(db: Session, organisation_id: int):
         ("1400", "Supplier Advances", "asset"), ("2200", "Customer Advances", "liability"),
         ("2110", "Output CGST", "liability"), ("2120", "Output SGST", "liability"), ("2130", "Output IGST", "liability"),
         ("1310", "Input CGST", "asset"), ("1320", "Input SGST", "asset"), ("1330", "Input IGST", "asset"),
-        ("4000", "Sales Revenue", "income"), ("5000", "Purchases / Cost of Goods", "expense"),
+        ("4000", "Sales Revenue", "income"), ("4100", "Inventory Adjustment Gain", "income"),
+        ("5000", "Purchases / Cost of Goods", "expense"), ("5100", "Inventory Write-off / Adjustment Loss", "expense"),
     ]
     for code, name, account_type in accounts:
         db.add(ERPAccount(organisation_id=organisation_id, account_code=code, name=name, account_type=account_type, is_system=True))

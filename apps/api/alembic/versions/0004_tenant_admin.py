@@ -107,11 +107,12 @@ def upgrade():
       INSERT INTO role_permissions (organisation_id, role, permission_id)
       SELECT o.id, r.role, p.id
       FROM organisations o
-      CROSS JOIN (VALUES ('owner'), ('admin'), ('manager'), ('member')) AS r(role)
+      CROSS JOIN (VALUES ('owner'), ('admin'), ('manager'), ('accountant'), ('clinician'), ('technician'), ('member')) AS r(role)
       JOIN permissions p ON
         (r.role = 'owner')
         OR (r.role = 'admin' AND p.code <> 'org.manage')
         OR (r.role = 'manager' AND p.code IN ('org.read','facility.read','user.read','audit.read'))
+        OR (r.role IN ('accountant','clinician','technician') AND p.code IN ('org.read','facility.read'))
         OR (r.role = 'member' AND p.code IN ('org.read','facility.read'))
     """)
 

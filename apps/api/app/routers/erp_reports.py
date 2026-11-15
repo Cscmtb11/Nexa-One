@@ -187,7 +187,7 @@ def stock_movements(
             func.coalesce(func.sum(ERPStockLedger.quantity_in), 0).label("quantity_in"),
             func.coalesce(func.sum(ERPStockLedger.quantity_out), 0).label("quantity_out"),
             func.coalesce(func.sum(ERPStockLedger.quantity_in * ERPStockLedger.unit_cost), 0).label("receipt_cost"),
-            func.coalesce(func.sum(ERPStockLedger.quantity_out * ERPStockLedger.unit_cost), 0).label("issue_cost_at_recorded_rate"),
+            func.coalesce(func.sum(ERPStockLedger.quantity_out * ERPStockLedger.unit_cost), 0).label("issue_value_at_recorded_rate"),
         )
         .join(ERPStockLedger, ERPStockLedger.item_id == ERPItem.id)
         .filter(ERPItem.organisation_id == m.organisation_id, ERPStockLedger.organisation_id == m.organisation_id)

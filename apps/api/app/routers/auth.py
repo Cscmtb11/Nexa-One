@@ -15,8 +15,22 @@ def _seed_organisation_defaults(db: Session, organisation_id: int):
     for module in core_modules:
         db.add(OrganisationModule(organisation_id=organisation_id, module_id=module.id, enabled=True))
 
-    permission_rows = db.query(Permission).all()
-    by_code = {permission.code: permission for permission in permission_rows}
+    permission_catalog = {
+        "org.read": "View organisation settings",
+        "org.manage": "Manage organisation settings",
+        "facility.read": "View facilities",
+        "facility.manage": "Create and manage facilities",
+        "user.read": "View organisation users",
+        "user.manage": "Manage organisation users",
+        "audit.read": "View audit events",
+    }
+    by_code = {permission.code: permission for permission in db.query(Permission).all()}
+    for code, description in permission_catalog.items():
+        if code not in by_code:
+            permission = Permission(code=code, description=description)
+            db.add(permission)
+            db.flush()
+            by_code[code] = permission
     role_grants = {
         "owner": set(by_code),
         "admin": set(by_code) - {"org.manage"},

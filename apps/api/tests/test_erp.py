@@ -104,3 +104,20 @@ def test_fifo_rejects_issue_beyond_available_layers():
     layers = replay_fifo_layers([{"quantity_in": Decimal("2"), "quantity_out": Decimal("0"), "unit_cost": Decimal("8")}])
     with pytest.raises(ValueError, match="Insufficient FIFO quantity"):
         issue_fifo_layers(layers, Decimal("3"))
+
+
+from app.routers.erp import StockTransferIn, StockAdjustmentIn
+
+
+def test_stock_transfer_schema_rejects_non_positive_quantity():
+    with pytest.raises(ValidationError):
+        StockTransferIn(reference_no="TR-1",item_id=1,source_facility_id=1,destination_facility_id=2,
+            quantity="0",operation_date="2026-11-15",reason="Branch replenishment")
+
+
+def test_stock_adjustment_requires_supported_direction():
+    StockAdjustmentIn(reference_no="ADJ-1",item_id=1,facility_id=1,direction="increase",
+        quantity="2",unit_cost="15",operation_date="2026-11-15",reason="Opening count correction")
+    with pytest.raises(ValidationError):
+        StockAdjustmentIn(reference_no="ADJ-2",item_id=1,facility_id=1,direction="transfer",
+            quantity="2",operation_date="2026-11-15",reason="Invalid direction")

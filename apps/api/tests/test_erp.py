@@ -76,3 +76,31 @@ def test_bank_account_and_statement_validation():
     with pytest.raises(ValidationError):
         BankStatementLineIn(bank_account_id=1, transaction_date="2026-11-15",
             description="Invalid", direction="transfer", amount="100")
+
+
+from app.inventory_costing import replay_fifo_layers, issue_fifo_layers, fifo_layer_totals
+
+
+def test_fifo_consumes_oldest_purchase_layers_first():
+    layers = replay_fifo_layers([
+        {"quantity_in": Decimal("5"), "quantity_out": Decimal("0"), "unit_cost": Decimal("10")},
+        {"quantity_in": Decimal("3"), "quantity_out": Decimal("0"), "unit_cost": Decimal("14")},
+    ])
+    cost = issue_fifo_layers(layers, Decimal("6"))
+    assert cost == Decimal("64.00")
+    assert layers == [{"quantity": Decimal("2"), "unit_cost": Decimal("14")}]
+
+
+def test_fifo_replay_applies_prior_sales_to_oldest_layers():
+    layers = replay_fifo_layers([
+        {"quantity_in": Decimal("4"), "quantity_out": Decimal("0"), "unit_cost": Decimal("12")},
+        {"quantity_in": Decimal("0"), "quantity_out": Decimal("1"), "unit_cost": Decimal("999")},
+        {"quantity_in": Decimal("2"), "quantity_out": Decimal("0"), "unit_cost": Decimal("15")},
+    ])
+    assert fifo_layer_totals(layers) == (Decimal("5"), Decimal("63.00"))
+
+
+def test_fifo_rejects_issue_beyond_available_layers():
+    layers = replay_fifo_layers([{"quantity_in": Decimal("2"), "quantity_out": Decimal("0"), "unit_cost": Decimal("8")}])
+    with pytest.raises(ValueError, match="Insufficient FIFO quantity"):
+        issue_fifo_layers(layers, Decimal("3"))

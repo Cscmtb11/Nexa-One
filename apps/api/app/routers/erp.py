@@ -9,6 +9,7 @@ from ..dependencies import current_user, require_org_permission
 from ..models import (
     AuditEvent, ERPAccount, ERPDocument, ERPDocumentLine, ERPItem, ERPJournalEntry,
     ERPJournalLine, ERPParty, ERPStockLedger, ERPTaxCode, FinancialYear, Facility,
+    GSTRegistration, ERPPayment, ERPPaymentAllocation, ERPBankAccount, ERPBankStatementLine,
     Membership, User,
 )
 
@@ -54,6 +55,35 @@ class DocumentLineIn(BaseModel):
     quantity: Decimal = Field(gt=0, le=100000000)
     unit_price: Decimal = Field(ge=0, le=1000000000)
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
+
+class PaymentAllocationIn(BaseModel):
+    document_id: int
+    amount: Decimal = Field(gt=0)
+
+class PaymentIn(BaseModel):
+    payment_no: str = Field(min_length=1, max_length=60)
+    payment_type: str = Field(pattern="^(customer_receipt|supplier_payment)$")
+    party_id: int
+    payment_date: date
+    amount: Decimal = Field(gt=0, le=100000000000)
+    method: str = Field(default="bank", pattern="^(cash|bank|upi|cheque|card|other)$")
+    bank_account_id: int | None = None
+    reference: str | None = Field(default=None, max_length=100)
+    allocations: list[PaymentAllocationIn] = Field(default_factory=list, max_length=100)
+
+class BankAccountIn(BaseModel):
+    account_code: str = Field(min_length=2, max_length=30)
+    bank_name: str = Field(min_length=2, max_length=120)
+    account_label: str = Field(min_length=2, max_length=120)
+    account_last4: str | None = Field(default=None, pattern="^[0-9]{4}$")
+
+class BankStatementLineIn(BaseModel):
+    bank_account_id: int
+    transaction_date: date
+    description: str = Field(min_length=2, max_length=250)
+    reference: str | None = Field(default=None, max_length=100)
+    direction: str = Field(pattern="^(debit|credit)$")
+    amount: Decimal = Field(gt=0, le=100000000000)
 
 class DocumentIn(BaseModel):
     document_type: str = Field(pattern="^(sales_invoice|purchase_bill)$")
@@ -139,8 +169,16 @@ def create_document(p: DocumentIn,m: Membership=Depends(require_org_permission("
     if p.due_date and p.due_date<p.issue_date: raise HTTPException(422,detail="Due date cannot precede issue date")
     if db.query(ERPDocument.id).filter_by(organisation_id=org,document_no=p.document_no).first():
         raise HTTPException(409,detail="Document number already exists")
+    registration_q=db.query(GSTRegistration).filter_by(organisation_id=org,is_active=True,is_primary=True)
+    if p.facility_id:
+        registration_q=registration_q.filter((GSTRegistration.facility_id==p.facility_id) | (GSTRegistration.facility_id.is_(None)))
+    else:
+        registration_q=registration_q.filter(GSTRegistration.facility_id.is_(None))
+    seller_registration=registration_q.order_by(GSTRegistration.facility_id.desc()).first()
+    seller_state=seller_registration.state_code if seller_registration else None
+    place_state=p.place_of_supply_state or party.state_code
     doc=ERPDocument(organisation_id=org,facility_id=p.facility_id,party_id=party.id,document_type=p.document_type,
-        document_no=p.document_no,issue_date=p.issue_date,due_date=p.due_date,place_of_supply_state=p.place_of_supply_state,
+        document_no=p.document_no,issue_date=p.issue_date,due_date=p.due_date,place_of_supply_state=place_state,
         created_by_user_id=u.id,status="draft")
     db.add(doc);db.flush()
     for line in p.lines:
@@ -154,9 +192,20 @@ def create_document(p: DocumentIn,m: Membership=Depends(require_org_permission("
         if discount>gross: db.rollback();raise HTTPException(422,detail="Line discount cannot exceed its gross amount")
         taxable=money(gross-discount);rate=Decimal("0") if not tax or tax.is_exempt else Decimal(tax.rate)
         tax_amount=money(taxable*rate/Decimal("100"))
+        cgst=sgst=igst=Decimal("0.00")
+        if tax_amount:
+            if not seller_state or not place_state:
+                db.rollback()
+                raise HTTPException(422,detail="Configure a primary GST registration state and party/place-of-supply state before applying GST")
+            if seller_state==place_state:
+                cgst=money(tax_amount/Decimal("2"))
+                sgst=money(tax_amount-cgst)
+            else:
+                igst=tax_amount
         db.add(ERPDocumentLine(document_id=doc.id,item_id=item.id,tax_code_id=tax.id if tax else None,
             description=line.description or item.name,quantity=line.quantity,unit_price=line.unit_price,
-            discount_amount=discount,tax_rate=rate,taxable_amount=taxable,tax_amount=tax_amount,line_total=taxable+tax_amount))
+            discount_amount=discount,tax_rate=rate,taxable_amount=taxable,tax_amount=tax_amount,
+            cgst_amount=cgst,sgst_amount=sgst,igst_amount=igst,line_total=taxable+tax_amount))
     _audit(db,m,u,"erp.document.draft_created","erp_document",doc.id,f"Created draft {p.document_type} {p.document_no}")
     db.commit();db.refresh(doc);return doc
 
@@ -179,16 +228,30 @@ def post_document(document_id:int,m:Membership=Depends(require_org_permission("e
     inbound=doc.document_type=="purchase_bill"
     party_account=_account(db,org,"2000" if inbound else "1100")
     base_account=_account(db,org,"1200" if inbound else "4000")
-    tax_account=_account(db,org,"1300" if inbound else "2100")
+    tax_accounts = {
+        "cgst": _account(db,org,"1310" if inbound else "2110"),
+        "sgst": _account(db,org,"1320" if inbound else "2120"),
+        "igst": _account(db,org,"1330" if inbound else "2130"),
+    }
     journal=ERPJournalEntry(organisation_id=org,document_id=doc.id,entry_no=f"ERP-{doc.document_no}",entry_date=doc.issue_date,
         narration=f"{doc.document_type.replace('_',' ').title()} {doc.document_no}",posted_by_user_id=u.id)
     db.add(journal);db.flush()
     def jl(account,debit=0,credit=0):
         db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=account.id,debit=money(debit),credit=money(credit),party_id=party.id))
+    cgst_total=sum((Decimal(x.cgst_amount) for x in lines),Decimal("0"))
+    sgst_total=sum((Decimal(x.sgst_amount) for x in lines),Decimal("0"))
+    igst_total=sum((Decimal(x.igst_amount) for x in lines),Decimal("0"))
     if inbound:
-        jl(base_account,debit=subtotal);jl(tax_account,debit=tax_total);jl(party_account,credit=grand)
+        jl(base_account,debit=subtotal)
+        if cgst_total: jl(tax_accounts["cgst"],debit=cgst_total)
+        if sgst_total: jl(tax_accounts["sgst"],debit=sgst_total)
+        if igst_total: jl(tax_accounts["igst"],debit=igst_total)
+        jl(party_account,credit=grand)
     else:
-        jl(party_account,debit=grand);jl(base_account,credit=subtotal);jl(tax_account,credit=tax_total)
+        jl(party_account,debit=grand);jl(base_account,credit=subtotal)
+        if cgst_total: jl(tax_accounts["cgst"],credit=cgst_total)
+        if sgst_total: jl(tax_accounts["sgst"],credit=sgst_total)
+        if igst_total: jl(tax_accounts["igst"],credit=igst_total)
     for line in lines:
         item=db.query(ERPItem).filter_by(id=line.item_id,organisation_id=org).first()
         if item.track_stock and item.item_type=="goods":
@@ -222,3 +285,157 @@ def stock_balances(facility_id:int|None=None,m:Membership=Depends(require_org_pe
 @router.get("/journals")
 def list_journals(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):
     return db.query(ERPJournalEntry).filter_by(organisation_id=m.organisation_id).order_by(ERPJournalEntry.entry_date.desc(),ERPJournalEntry.id.desc()).limit(500).all()
+
+
+@router.get("/party-balances")
+def party_balances(m: Membership=Depends(require_org_permission("erp.read")), db: Session=Depends(get_db)):
+    rows=db.query(ERPParty.id,ERPParty.party_code,ERPParty.name,ERPParty.party_type,
+        func.coalesce(func.sum(ERPJournalLine.debit-ERPJournalLine.credit),0).label("net"))
+    rows=rows.outerjoin(ERPJournalLine,ERPJournalLine.party_id==ERPParty.id)
+    rows=rows.outerjoin(ERPJournalEntry,ERPJournalEntry.id==ERPJournalLine.journal_entry_id)
+    rows=rows.filter(ERPParty.organisation_id==m.organisation_id).group_by(
+        ERPParty.id,ERPParty.party_code,ERPParty.name,ERPParty.party_type).order_by(ERPParty.name)
+    result=[]
+    for r in rows.all():
+        net=money(r.net or 0)
+        result.append({"party_id":r.id,"party_code":r.party_code,"name":r.name,"party_type":r.party_type,
+            "receivable":str(net if net>0 else Decimal("0.00")),
+            "payable":str(-net if net<0 else Decimal("0.00"))})
+    return result
+
+
+@router.get("/payments")
+def list_payments(m: Membership=Depends(require_org_permission("erp.read")), db: Session=Depends(get_db)):
+    return db.query(ERPPayment).filter_by(organisation_id=m.organisation_id).order_by(
+        ERPPayment.payment_date.desc(),ERPPayment.id.desc()).limit(500).all()
+
+
+@router.post("/payments",status_code=201)
+def create_payment(p: PaymentIn,m: Membership=Depends(require_org_permission("erp.manage")),
+                   u: User=Depends(current_user),db: Session=Depends(get_db)):
+    org=m.organisation_id
+    party=db.query(ERPParty).filter_by(id=p.party_id,organisation_id=org,is_active=True).first()
+    expected="customer" if p.payment_type=="customer_receipt" else "supplier"
+    if not party or party.party_type not in {expected,"both"}:
+        raise HTTPException(422,detail=f"Select an active {expected} belonging to this organisation")
+    if db.query(ERPPayment.id).filter_by(organisation_id=org,payment_no=p.payment_no).first():
+        raise HTTPException(409,detail="Payment number already exists")
+    bank=None
+    if p.method!="cash":
+        if not p.bank_account_id:
+            raise HTTPException(422,detail="Select a bank account for non-cash payments")
+        bank=db.query(ERPBankAccount).filter_by(id=p.bank_account_id,organisation_id=org,is_active=True).first()
+        if not bank: raise HTTPException(422,detail="Bank account does not belong to this organisation")
+    elif p.bank_account_id:
+        raise HTTPException(422,detail="Cash payments should not specify a bank account")
+    allocated=Decimal("0")
+    checked=[]
+    for allocation in p.allocations:
+        doc=db.query(ERPDocument).filter_by(id=allocation.document_id,organisation_id=org,party_id=party.id,status="posted").with_for_update().first()
+        expected_doc="sales_invoice" if p.payment_type=="customer_receipt" else "purchase_bill"
+        if not doc or doc.document_type!=expected_doc:
+            raise HTTPException(422,detail="Allocation must reference a posted invoice/bill for this party")
+        already=db.query(func.coalesce(func.sum(ERPPaymentAllocation.amount),0)).join(
+            ERPPayment,ERPPayment.id==ERPPaymentAllocation.payment_id).filter(
+            ERPPayment.organisation_id==org,ERPPaymentAllocation.document_id==doc.id).scalar() or 0
+        outstanding=money(Decimal(doc.grand_total)-Decimal(already))
+        amount=money(allocation.amount)
+        if amount>outstanding:
+            raise HTTPException(422,detail=f"Allocation exceeds outstanding balance for {doc.document_no} ({outstanding})")
+        allocated+=amount;checked.append((doc,amount))
+    if allocated>money(p.amount):
+        raise HTTPException(422,detail="Allocations cannot exceed payment amount")
+    cash_account=_account(db,org,bank.account_code if bank else "1000")
+    party_account=_account(db,org,"1100" if p.payment_type=="customer_receipt" else "2000")
+    journal=ERPJournalEntry(organisation_id=org,document_id=None,entry_no=f"PAY-{p.payment_no}",
+        entry_date=p.payment_date,narration=f"{p.payment_type.replace('_',' ').title()} {p.payment_no}",
+        posted_by_user_id=u.id)
+    db.add(journal);db.flush()
+    if p.payment_type=="customer_receipt":
+        db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=cash_account.id,debit=money(p.amount),credit=0,party_id=None))
+        db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=party_account.id,debit=0,credit=money(p.amount),party_id=party.id))
+    else:
+        db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=party_account.id,debit=money(p.amount),credit=0,party_id=party.id))
+        db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=cash_account.id,debit=0,credit=money(p.amount),party_id=None))
+    payment=ERPPayment(organisation_id=org,party_id=party.id,bank_account_id=bank.id if bank else None,
+        journal_entry_id=journal.id,payment_no=p.payment_no,payment_type=p.payment_type,
+        payment_date=p.payment_date,amount=money(p.amount),method=p.method,reference=p.reference,created_by_user_id=u.id)
+    db.add(payment);db.flush()
+    for doc,amount in checked:
+        db.add(ERPPaymentAllocation(payment_id=payment.id,document_id=doc.id,amount=amount))
+    _audit(db,m,u,"erp.payment.posted","erp_payment",payment.id,
+        f"Posted {p.payment_type} {p.payment_no} for {money(p.amount)}; allocated {money(allocated)}")
+    db.commit();db.refresh(payment)
+    return {"payment":payment,"allocated_amount":money(allocated),"unallocated_amount":money(p.amount)-money(allocated)}
+
+
+@router.get("/bank-accounts")
+def list_bank_accounts(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):
+    return db.query(ERPBankAccount).filter_by(organisation_id=m.organisation_id,is_active=True).order_by(ERPBankAccount.account_code).all()
+
+
+@router.post("/bank-accounts",status_code=201)
+def create_bank_account(p:BankAccountIn,m:Membership=Depends(require_org_permission("erp.manage")),
+                        u:User=Depends(current_user),db:Session=Depends(get_db)):
+    if db.query(ERPBankAccount.id).filter_by(organisation_id=m.organisation_id,account_code=p.account_code).first():
+        raise HTTPException(409,detail="Bank ledger code already exists")
+    ledger=ERPAccount(organisation_id=m.organisation_id,account_code=p.account_code,
+        name=f"{p.bank_name} — {p.account_label}",account_type="asset",is_system=False)
+    db.add(ledger);db.flush()
+    row=ERPBankAccount(organisation_id=m.organisation_id,ledger_account_id=ledger.id,**p.model_dump())
+    db.add(row);db.flush()
+    _audit(db,m,u,"erp.bank_account.created","erp_bank_account",row.id,f"Created bank account {p.account_label}")
+    db.commit();db.refresh(row);return row
+
+
+@router.get("/bank-statement-lines")
+def list_bank_statement_lines(bank_account_id:int|None=None,m:Membership=Depends(require_org_permission("erp.read")),
+                              db:Session=Depends(get_db)):
+    q=db.query(ERPBankStatementLine).filter_by(organisation_id=m.organisation_id)
+    if bank_account_id is not None:q=q.filter_by(bank_account_id=bank_account_id)
+    return q.order_by(ERPBankStatementLine.transaction_date.desc(),ERPBankStatementLine.id.desc()).limit(1000).all()
+
+
+@router.post("/bank-statement-lines",status_code=201)
+def import_bank_statement_line(p:BankStatementLineIn,m:Membership=Depends(require_org_permission("erp.manage")),
+                               u:User=Depends(current_user),db:Session=Depends(get_db)):
+    bank=db.query(ERPBankAccount).filter_by(id=p.bank_account_id,organisation_id=m.organisation_id,is_active=True).first()
+    if not bank:raise HTTPException(422,detail="Bank account does not belong to this organisation")
+    row=ERPBankStatementLine(organisation_id=m.organisation_id,**p.model_dump())
+    db.add(row);db.flush()
+    _audit(db,m,u,"erp.bank_statement.imported","erp_bank_statement_line",row.id,
+        f"Imported {p.direction} statement line {p.amount}")
+    db.commit();db.refresh(row);return row
+
+
+@router.post("/bank-statement-lines/{line_id}/reconcile")
+def reconcile_bank_statement_line(line_id:int,payment_id:int,m:Membership=Depends(require_org_permission("erp.manage")),
+                                  u:User=Depends(current_user),db:Session=Depends(get_db)):
+    line=db.query(ERPBankStatementLine).filter_by(id=line_id,organisation_id=m.organisation_id).with_for_update().first()
+    if not line:raise HTTPException(404,detail="Statement line not found")
+    if line.reconciled_payment_id:raise HTTPException(409,detail="Statement line is already reconciled")
+    payment=db.query(ERPPayment).filter_by(id=payment_id,organisation_id=m.organisation_id).first()
+    if not payment:raise HTTPException(404,detail="Payment not found")
+    if payment.bank_account_id!=line.bank_account_id:
+        raise HTTPException(422,detail="Payment and statement line belong to different bank accounts")
+    expected_direction="credit" if payment.payment_type=="customer_receipt" else "debit"
+    if line.direction!=expected_direction or money(line.amount)!=money(payment.amount):
+        raise HTTPException(422,detail="Statement direction or amount does not match the payment")
+    if line.transaction_date<payment.payment_date:
+        raise HTTPException(422,detail="Statement transaction date cannot precede payment date")
+    line.reconciled_payment_id=payment.id
+    _audit(db,m,u,"erp.bank_statement.reconciled","erp_bank_statement_line",line.id,
+        f"Matched statement line to payment {payment.payment_no}")
+    db.commit();db.refresh(line);return line
+
+
+@router.get("/bank-reconciliation-summary")
+def bank_reconciliation_summary(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):
+    rows=db.query(ERPBankStatementLine.bank_account_id,
+        func.count(ERPBankStatementLine.id).label("line_count"),
+        func.sum(ERPBankStatementLine.amount).label("gross_amount"),
+        func.sum(func.case((ERPBankStatementLine.reconciled_payment_id.is_not(None),1),else_=0)).label("matched_count")
+    ).filter_by(organisation_id=m.organisation_id).group_by(ERPBankStatementLine.bank_account_id).all()
+    return [{"bank_account_id":r.bank_account_id,"line_count":r.line_count,
+        "matched_count":int(r.matched_count or 0),"unmatched_count":r.line_count-int(r.matched_count or 0),
+        "statement_gross":str(money(r.gross_amount or 0))} for r in rows]

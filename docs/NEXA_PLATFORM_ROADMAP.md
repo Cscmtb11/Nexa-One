@@ -39,12 +39,20 @@ The catalogue is seeded by Alembic migration. Each tenant receives the mandatory
 - Audit module entitlement changes.
 - Add Oracle production Compose deployment template and migration-capable API image.
 
-### Phase 2 — Tenant administration
-- Legal entities and organisation profiles.
-- GST registrations and branch/facility hierarchy.
-- User invitations, memberships and role-permission enforcement.
-- Tenant settings, financial years and numbering sequences.
-- Subscription plans, entitlements and usage metering.
+### Phase 2 — Tenant administration (implemented in phase-2 branch)
+- Legal entity registry with PAN, constitution and address details.
+- GST registrations linked to legal entities and optional facilities; format, state-code and PAN-segment checks.
+- Organisation-scoped financial years with overlap prevention and a single current year.
+- Allow-listed organisation settings with audit events.
+- User directory and expiring one-time invitations for existing NEXA accounts.
+- Configurable role-permission matrix and tenant-scoped permission dependency for facility and module APIs.
+- New organisation registration automatically provisions core modules and starter role permissions.
+- Responsive /admin web workspace for legal entities, GST, financial years, users, permissions and settings.
+
+Still planned for a later phase:
+- Subscription plans, billing, entitlements and usage metering.
+- Email delivery and self-service onboarding for invitations to new accounts.
+- Granular permission checks on every business endpoint and platform-admin support-session controls.
 
 ### Phase 3 — Shared ERP engines
 - Item/service master, units, tax codes and price lists.

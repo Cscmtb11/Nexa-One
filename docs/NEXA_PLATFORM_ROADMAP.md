@@ -54,11 +54,20 @@ Still planned for a later phase:
 - Email delivery and self-service onboarding for invitations to new accounts.
 - Granular permission checks on every business endpoint and platform-admin support-session controls.
 
-### Phase 3 — Shared ERP engines
-- Item/service master, units, tax codes and price lists.
-- Purchase, sales, stock ledger, batch/serial and expiry controls.
-- Double-entry accounting, receivables, payables and bank reconciliation.
-- Document numbering, attachments and approval workflows.
+### Phase 3 — Shared ERP engines (first engine slice implemented in phase-3 branch)
+- Tenant-scoped item/service, customer/supplier and GST tax-code masters.
+- Draft sales invoices and purchase bills with line-level discounts and tax calculation.
+- Posting workflow with open-financial-year checks, immutable posted status and audit events.
+- Double-entry journal generation with a seeded starter chart of accounts and balanced-entry assertion.
+- Facility-aware stock movement ledger and stock-on-hand query; posting blocks sales when tracked stock is insufficient.
+- New organisation registration provisions the ERP chart of accounts and GST tax-code catalogue.
+
+Phase 3 follow-on work still required before production accounting use:
+- GSTIN e-invoice/IRN, HSN/SAC rules, place-of-supply CGST/SGST/IGST split and return reconciliation.
+- Payment receipts, supplier payments, allocations, bank statement import and reconciliation.
+- Weighted-average/FIFO valuation, COGS posting, stock transfers, adjustments, batch/serial and expiry.
+- Purchase orders, sales orders, approval workflows, attachments, credit/debit notes and document numbering sequences.
+- Financial statements, trial balance, receivables/payables ageing and period close controls.
 
 ### Phase 4 — Healthcare
 - Patient master index, registration, consent and appointments.

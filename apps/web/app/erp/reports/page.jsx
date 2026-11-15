@@ -1,15 +1,18 @@
 "use client";
 import {useCallback,useEffect,useState} from "react";
 const API=process.env.NEXT_PUBLIC_API_URL||"http://localhost:8000";
+const localDate=(d)=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-");
+const today=new Date();
+const financialYearStart=new Date(today.getFullYear()-(today.getMonth()<3?1:0),3,1);
 function Table({rows,cols}){if(!rows?.length)return <div className="admin-empty">No records for this period.</div>;return <div className="admin-table-wrap"><table className="admin-table"><thead><tr>{cols.map(c=><th key={c[0]}>{c[1]}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr key={r.account_code||r.item_id||i}>{cols.map(c=><td key={c[0]}>{String(r[c[0]]??"—")}</td>)}</tr>)}</tbody></table></div>}
 export default function ReportsPage(){
  const [token,setToken]=useState("");const [orgs,setOrgs]=useState([]);const [orgId,setOrgId]=useState("");
- const [report,setReport]=useState("trial-balance");const [asOf,setAsOf]=useState(new Date().toISOString().slice(0,10));
- const [start,setStart]=useState(new Date(new Date().getFullYear(),3,1).toISOString().slice(0,10));const [end,setEnd]=useState(new Date().toISOString().slice(0,10));
+ const [report,setReport]=useState("trial-balance");const [asOf,setAsOf]=useState(()=>localDate(today));
+ const [start,setStart]=useState(()=>localDate(financialYearStart));const [end,setEnd]=useState(()=>localDate(today));
  const [data,setData]=useState(null);const [error,setError]=useState("");const [busy,setBusy]=useState(false);
  const request=useCallback(async(path)=>{const r=await fetch(API+path,{headers:{Authorization:"Bearer "+token,...(orgId?{"X-Org-Id":String(orgId)}:{})}});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||"Unable to load report");return b},[token,orgId]);
  useEffect(()=>{const t=sessionStorage.getItem("nexa_erp_token")||"";setToken(t);if(t)fetch(API+"/v1/organisations",{headers:{Authorization:"Bearer "+t}}).then(r=>r.json()).then(x=>{setOrgs(x);if(x.length)setOrgId(String(x[0].id))}).catch(e=>setError(e.message))},[]);
- const load=useCallback(async()=>{if(!token||!orgId)return;setBusy(true);setError("");try{let path="/v1/erp/reports/"+report;if(report==="trial-balance"||report==="balance-sheet")path+="?as_of="+asOf;else if(report==="profit-and-loss")path+="?start_date="+start+"&end_date="+end;else path+="?start_date="+start+"&end_date="+end;setData(await request(path))}catch(e){setError(e.message)}finally{setBusy(false)}},[token,orgId,report,asOf,start,end,request]);
+ const load=useCallback(async()=>{if(!token||!orgId)return;setBusy(true);setError("");setData(null);try{let path="/v1/erp/reports/"+report;if(report==="trial-balance"||report==="balance-sheet")path+="?as_of="+asOf;else if(report==="profit-and-loss")path+="?start_date="+start+"&end_date="+end;else path+="?start_date="+start+"&end_date="+end;setData(await request(path))}catch(e){setError(e.message)}finally{setBusy(false)}},[token,orgId,report,asOf,start,end,request]);
  useEffect(()=>{load()},[load]);
  const rows=report==="trial-balance"?data?.rows:report==="stock-movements"?data:(report==="profit-and-loss"?[...(data?.income||[]),...(data?.expenses||[])]:[]);
  return <main className="admin-shell"><header className="admin-top"><div><div className="admin-brand">NEXA <span>FINANCIAL REPORTING</span></div><h1>Reports & statements</h1><p>Tenant-scoped accounting statements and inventory movement summaries.</p></div><div className="admin-top-actions"><select value={orgId} onChange={e=>setOrgId(e.target.value)}>{orgs.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select><a className="admin-secondary" href="/erp">ERP workspace</a></div></header>

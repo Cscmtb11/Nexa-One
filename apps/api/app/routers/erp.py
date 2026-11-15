@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from ..db import get_db
 from ..dependencies import current_user, require_org_permission
@@ -377,7 +377,7 @@ def list_bank_accounts(m:Membership=Depends(require_org_permission("erp.read")),
 @router.post("/bank-accounts",status_code=201)
 def create_bank_account(p:BankAccountIn,m:Membership=Depends(require_org_permission("erp.manage")),
                         u:User=Depends(current_user),db:Session=Depends(get_db)):
-    if db.query(ERPBankAccount.id).filter_by(organisation_id=m.organisation_id,account_code=p.account_code).first():
+    if db.query(ERPBankAccount.id).filter_by(organisation_id=m.organisation_id,account_code=p.account_code).first() or db.query(ERPAccount.id).filter_by(organisation_id=m.organisation_id,account_code=p.account_code).first():
         raise HTTPException(409,detail="Bank ledger code already exists")
     ledger=ERPAccount(organisation_id=m.organisation_id,account_code=p.account_code,
         name=f"{p.bank_name} — {p.account_label}",account_type="asset",is_system=False)
@@ -434,7 +434,7 @@ def bank_reconciliation_summary(m:Membership=Depends(require_org_permission("erp
     rows=db.query(ERPBankStatementLine.bank_account_id,
         func.count(ERPBankStatementLine.id).label("line_count"),
         func.sum(ERPBankStatementLine.amount).label("gross_amount"),
-        func.sum(func.case((ERPBankStatementLine.reconciled_payment_id.is_not(None),1),else_=0)).label("matched_count")
+        func.sum(case((ERPBankStatementLine.reconciled_payment_id.is_not(None),1),else_=0)).label("matched_count")
     ).filter_by(organisation_id=m.organisation_id).group_by(ERPBankStatementLine.bank_account_id).all()
     return [{"bank_account_id":r.bank_account_id,"line_count":r.line_count,
         "matched_count":int(r.matched_count or 0),"unmatched_count":r.line_count-int(r.matched_count or 0),

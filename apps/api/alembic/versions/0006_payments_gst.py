@@ -66,8 +66,8 @@ def upgrade():
     op.execute("""
       INSERT INTO erp_accounts (organisation_id,account_code,name,account_type,is_system)
       SELECT o.id,a.code,a.name,a.kind,TRUE FROM organisations o CROSS JOIN (VALUES
-        ('2110','Output CGST','liability'),('2120','Output SGST','liability'),('2130','Output IGST','liability'),
-        ('1310','Input CGST','asset'),('1320','Input SGST','asset'),('1330','Input IGST','asset')
+        ('2110','Output CGST','liability'),('2120','Output SGST','liability'),('2130','Output IGST','liability'),('2200','Customer Advances','liability'),
+        ('1310','Input CGST','asset'),('1320','Input SGST','asset'),('1330','Input IGST','asset'),('1400','Supplier Advances','asset')
       ) a(code,name,kind)
       ON CONFLICT (organisation_id,account_code) DO NOTHING
     """)

@@ -69,14 +69,14 @@ class DocumentLineIn(BaseModel):
 
 class PaymentAllocationIn(BaseModel):
     document_id: int
-    amount: Decimal = Field(gt=0)
+    amount: Decimal = Field(ge=Decimal("0.01"))
 
 class PaymentIn(BaseModel):
     payment_no: str = Field(min_length=1, max_length=60)
     payment_type: str = Field(pattern="^(customer_receipt|supplier_payment)$")
     party_id: int
     payment_date: date
-    amount: Decimal = Field(gt=0, le=100000000000)
+    amount: Decimal = Field(ge=Decimal("0.01"), le=100000000000)
     method: str = Field(default="bank", pattern="^(cash|bank|upi|cheque|card|other)$")
     bank_account_id: int | None = None
     reference: str | None = Field(default=None, max_length=100)
@@ -295,19 +295,21 @@ def list_journals(m:Membership=Depends(require_org_permission("erp.read")),db:Se
 
 @router.get("/party-balances")
 def party_balances(m: Membership=Depends(require_org_permission("erp.read")), db: Session=Depends(get_db)):
+    ar=func.coalesce(func.sum(case((ERPAccount.account_code=="1100",ERPJournalLine.debit-ERPJournalLine.credit),else_=0)),0)
+    ap=func.coalesce(func.sum(case((ERPAccount.account_code=="2000",ERPJournalLine.credit-ERPJournalLine.debit),else_=0)),0)
+    ca=func.coalesce(func.sum(case((ERPAccount.account_code=="2200",ERPJournalLine.credit-ERPJournalLine.debit),else_=0)),0)
+    sa=func.coalesce(func.sum(case((ERPAccount.account_code=="1400",ERPJournalLine.debit-ERPJournalLine.credit),else_=0)),0)
     rows=db.query(ERPParty.id,ERPParty.party_code,ERPParty.name,ERPParty.party_type,
-        func.coalesce(func.sum(ERPJournalLine.debit-ERPJournalLine.credit),0).label("net"))
+        ar.label("receivable"),ap.label("payable"),ca.label("customer_advance"),sa.label("supplier_advance"))
     rows=rows.outerjoin(ERPJournalLine,ERPJournalLine.party_id==ERPParty.id)
+    rows=rows.outerjoin(ERPAccount,ERPAccount.id==ERPJournalLine.account_id)
     rows=rows.outerjoin(ERPJournalEntry,ERPJournalEntry.id==ERPJournalLine.journal_entry_id)
     rows=rows.filter(ERPParty.organisation_id==m.organisation_id).group_by(
         ERPParty.id,ERPParty.party_code,ERPParty.name,ERPParty.party_type).order_by(ERPParty.name)
-    result=[]
-    for r in rows.all():
-        net=money(r.net or 0)
-        result.append({"party_id":r.id,"party_code":r.party_code,"name":r.name,"party_type":r.party_type,
-            "receivable":str(net if net>0 else Decimal("0.00")),
-            "payable":str(-net if net<0 else Decimal("0.00"))})
-    return result
+    return [{"party_id":r.id,"party_code":r.party_code,"name":r.name,"party_type":r.party_type,
+        "receivable":str(money(r.receivable or 0)),"payable":str(money(r.payable or 0)),
+        "customer_advance":str(money(r.customer_advance or 0)),
+        "supplier_advance":str(money(r.supplier_advance or 0))} for r in rows.all()]
 
 
 @router.get("/payments")
@@ -339,6 +341,7 @@ def create_payment(p: PaymentIn,m: Membership=Depends(require_org_permission("er
         raise HTTPException(422,detail="Cash payments should not specify a bank account")
     allocated=Decimal("0")
     checked=[]
+    planned_by_doc={}
     for allocation in p.allocations:
         doc=db.query(ERPDocument).filter_by(id=allocation.document_id,organisation_id=org,party_id=party.id,status="posted").with_for_update().first()
         expected_doc="sales_invoice" if p.payment_type=="customer_receipt" else "purchase_bill"
@@ -347,24 +350,30 @@ def create_payment(p: PaymentIn,m: Membership=Depends(require_org_permission("er
         already=db.query(func.coalesce(func.sum(ERPPaymentAllocation.amount),0)).join(
             ERPPayment,ERPPayment.id==ERPPaymentAllocation.payment_id).filter(
             ERPPayment.organisation_id==org,ERPPaymentAllocation.document_id==doc.id).scalar() or 0
-        outstanding=money(Decimal(doc.grand_total)-Decimal(already))
         amount=money(allocation.amount)
-        if amount>outstanding:
+        planned=planned_by_doc.get(doc.id,Decimal("0.00"))+amount
+        outstanding=money(Decimal(doc.grand_total)-Decimal(already))
+        if planned>outstanding:
             raise HTTPException(422,detail=f"Allocation exceeds outstanding balance for {doc.document_no} ({outstanding})")
+        planned_by_doc[doc.id]=planned
         allocated+=amount;checked.append((doc,amount))
     if allocated>money(p.amount):
         raise HTTPException(422,detail="Allocations cannot exceed payment amount")
+    unallocated=money(p.amount)-allocated
     cash_account=_account(db,org,bank.account_code if bank else "1000")
     party_account=_account(db,org,"1100" if p.payment_type=="customer_receipt" else "2000")
+    advance_account=_account(db,org,"2200" if p.payment_type=="customer_receipt" else "1400")
     journal=ERPJournalEntry(organisation_id=org,document_id=None,entry_no=f"PAY-{p.payment_no}",
         entry_date=p.payment_date,narration=f"{p.payment_type.replace('_',' ').title()} {p.payment_no}",
         posted_by_user_id=u.id)
     db.add(journal);db.flush()
     if p.payment_type=="customer_receipt":
         db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=cash_account.id,debit=money(p.amount),credit=0,party_id=None))
-        db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=party_account.id,debit=0,credit=money(p.amount),party_id=party.id))
+        if allocated: db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=party_account.id,debit=0,credit=allocated,party_id=party.id))
+        if unallocated: db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=advance_account.id,debit=0,credit=unallocated,party_id=party.id))
     else:
-        db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=party_account.id,debit=money(p.amount),credit=0,party_id=party.id))
+        if allocated: db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=party_account.id,debit=allocated,credit=0,party_id=party.id))
+        if unallocated: db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=advance_account.id,debit=unallocated,credit=0,party_id=party.id))
         db.add(ERPJournalLine(journal_entry_id=journal.id,account_id=cash_account.id,debit=0,credit=money(p.amount),party_id=None))
     payment=ERPPayment(organisation_id=org,party_id=party.id,bank_account_id=bank.id if bank else None,
         journal_entry_id=journal.id,payment_no=p.payment_no,payment_type=p.payment_type,

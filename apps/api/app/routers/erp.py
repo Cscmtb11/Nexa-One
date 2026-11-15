@@ -294,7 +294,7 @@ def post_document(document_id:int,m:Membership=Depends(require_org_permission("e
                 cogs_total += movement_cost
             db.add(ERPStockLedger(organisation_id=org,facility_id=doc.facility_id,item_id=item.id,document_id=doc.id,
                 movement_date=doc.issue_date,quantity_in=line.quantity if inbound else 0,
-                quantity_out=0 if inbound else line.quantity,unit_cost=movement_cost if inbound else money(movement_cost/Decimal(line.quantity)))
+                quantity_out=0 if inbound else line.quantity,unit_cost=movement_cost if inbound else money(movement_cost/Decimal(line.quantity))))
     if not inbound and cogs_total:
         jl(cogs_account,debit=money(cogs_total))
         jl(inventory_account,credit=money(cogs_total))

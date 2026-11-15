@@ -70,10 +70,13 @@ export default function TenantAdminPage(){
         request("/v1/tenant/financial-years"),
         request("/v1/tenant/users"),
         request("/v1/tenant/settings"),
-        request("/v1/facilities")
+        request("/v1/facilities"),
+        request("/v1/tenant/permissions")
       ]);
       setData({entities,gst:gstRows,years,users,settings});
       setFacilities(facilityRows);
+      setPermissionData(permissionRows);
+      setSelectedPermissions(permissionRows.roles?.[permissionRole] || []);
     }catch(e){setError(e.message);}
     finally{setBusy(false);}
   },[token,orgId,request]);

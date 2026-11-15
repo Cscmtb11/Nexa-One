@@ -3,7 +3,7 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const tabs = ["Legal entities", "GST registrations", "Financial years", "Users & access", "Organisation settings"];
+const tabs = ["Legal entities", "GST registrations", "Financial years", "Users & access", "Role permissions", "Organisation settings"];
 const emptyEntity = {code:"",legal_name:"",trade_name:"",pan:"",constitution:"other",address_line1:"",city:"",district:"",state_code:"",state_name:"",pincode:"",country:"IN"};
 const emptyGst = {legal_entity_id:"",facility_id:"",gstin:"",registration_type:"regular",state_code:"",effective_from:"",is_primary:false};
 const emptyYear = {name:"",start_date:"",end_date:"",is_current:false};
@@ -25,6 +25,9 @@ export default function TenantAdminPage(){
   const [active,setActive]=useState(tabs[0]);
   const [data,setData]=useState({entities:[],gst:[],years:[],users:[],settings:{}});
   const [facilities,setFacilities]=useState([]);
+  const [permissionData,setPermissionData]=useState({catalog:[],roles:{}});
+  const [permissionRole,setPermissionRole]=useState("manager");
+  const [selectedPermissions,setSelectedPermissions]=useState([]);
   const [entity,setEntity]=useState(emptyEntity);
   const [gst,setGst]=useState(emptyGst);
   const [year,setYear]=useState(emptyYear);
@@ -61,7 +64,7 @@ export default function TenantAdminPage(){
     if(!token || !orgId) return;
     setBusy(true);setError("");
     try{
-      const [entities,gstRows,years,users,settings,facilityRows]=await Promise.all([
+      const [entities,gstRows,years,users,settings,facilityRows,permissionRows]=await Promise.all([
         request("/v1/tenant/legal-entities"),
         request("/v1/tenant/gst-registrations"),
         request("/v1/tenant/financial-years"),
@@ -100,7 +103,7 @@ export default function TenantAdminPage(){
     finally{setBusy(false);}
   }
 
-  const currentOrg=useMemo(()=>organisations.find(o=>String(o.id)===String(orgId)),[organisations,orgId]);
+  useEffect(()=>{setSelectedPermissions(permissionData.roles?.[permissionRole] || []);},[permissionRole,permissionData]);\n\n  const currentOrg=useMemo(()=>organisations.find(o=>String(o.id)===String(orgId)),[organisations,orgId]);
 
   if(!token || !ready) return <main className="admin-login-shell"><form className="admin-login" onSubmit={login}><div className="admin-brand">NEXA <span>SPRINGNEXA PRIVATE LIMITED</span></div><h1>Tenant administration</h1><p>Sign in with your NEXA account to manage organisation registrations, branches and access.</p><Field label="Account email"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username"/></Field><Field label="Password"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required autoComplete="current-password"/></Field>{error&&<div className="admin-alert error">{error}</div>}<button className="admin-primary" disabled={busy}>{busy?"Signing in…":"Sign in"}</button><a href="/" className="admin-back">← Back to NEXA workspace</a></form></main>;
 
@@ -145,6 +148,7 @@ export default function TenantAdminPage(){
       <Field label="Role"><select value={invite.role} onChange={e=>setInvite({...invite,role:e.target.value})}>{["member","manager","accountant","clinician","technician","admin"].map(r=><option key={r}>{r}</option>)}</select></Field>
       <button className="admin-primary" disabled={busy}>Create invitation</button>
     </form>{invitationToken&&<div className="admin-note"><b>One-time invitation token</b><p>Share this token privately with the invited user. It is shown only now.</p><code>{invitationToken}</code></div>}<div className="admin-note">Only the organisation owner can invite an admin or change role permissions. Invitation tokens expire after seven days.</div></section><section className="admin-card"><h2>Organisation users</h2><DataGrid columns={[{key:"full_name",label:"Name"},{key:"email",label:"Email"},{key:"role",label:"Role"},{key:"is_active",label:"Active"}]} rows={data.users}/></section></div>}
+    {active==="Role permissions"&&<div className="admin-columns"><section className="admin-card"><h2>Role permission matrix</h2><p>Choose the capabilities available to each organisation role. Only the organisation owner can save changes.</p><Field label="Role"><select value={permissionRole} onChange={e=>setPermissionRole(e.target.value)}>{["admin","manager","accountant","clinician","technician","member"].map(r=><option key={r}>{r}</option>)}</select></Field><div className="permission-list">{permissionData.catalog.map(p=><label className="admin-check permission-check" key={p.code}><input type="checkbox" checked={selectedPermissions.includes(p.code)} onChange={e=>setSelectedPermissions(old=>e.target.checked?[...old,p.code]:old.filter(x=>x!==p.code))}/><span><b>{p.code}</b><small>{p.description}</small></span></label>)}</div><button className="admin-primary" disabled={busy} onClick={()=>{setBusy(true);setError("");request("/v1/tenant/permissions/"+permissionRole,{method:"PUT",body:JSON.stringify({permission_codes:selectedPermissions})}).then(()=>{setMessage("Role permissions updated.");loadData();}).catch(e=>setError(e.message)).finally(()=>setBusy(false));}}>Save role permissions</button></section><section className="admin-card"><h2>Access control guidance</h2><div className="admin-note">Owner retains full control. Admin cannot receive the organisation ownership permission. Manager and member starter permissions are seeded during organisation creation. Role changes are written to the organisation audit log.</div><div className="admin-note">This matrix is the configurable permission catalogue. Existing endpoint-specific owner/admin checks remain in force; granular enforcement across every business endpoint is part of the next security hardening pass.</div></section></div>}
     {active==="Organisation settings"&&<div className="admin-columns"><section className="admin-card"><h2>Update setting</h2><p>Settings are scoped to the selected organisation and every change is audited.</p><form className="admin-form" onSubmit={e=>{e.preventDefault();setBusy(true);setError("");setMessage("");request("/v1/tenant/settings/"+setting.key,{method:"PUT",body:JSON.stringify({value:setting.value})}).then(()=>{setMessage("Organisation setting saved.");loadData();}).catch(e=>setError(e.message)).finally(()=>setBusy(false));}}>
       <Field label="Setting"><select value={setting.key} onChange={e=>setSetting({...setting,key:e.target.value,value:data.settings[e.target.value]||""})}>{["timezone","locale","currency","date_format","financial_year_start_month","invoice_prefix","receipt_prefix","default_gst_registration_id","tax_mode","gst_exempt","organisation_display_name"].map(k=><option key={k}>{k}</option>)}</select></Field>
       <Field label="Value"><input value={setting.value} onChange={e=>setSetting({...setting,value:e.target.value})} required/></Field>

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .db import Base, engine
 from .settings import settings
-from .routers import auth, organisations, facilities, modules, tenant_admin
+from .routers import auth, organisations, facilities, modules, tenant_admin, erp
 
 app = FastAPI(title=settings.app_name, version="0.4.0")
 
@@ -28,3 +28,4 @@ app.include_router(organisations.router)
 app.include_router(facilities.router)
 app.include_router(modules.router)
 app.include_router(tenant_admin.router)
+app.include_router(erp.router)

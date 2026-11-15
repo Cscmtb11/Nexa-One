@@ -27,9 +27,24 @@ SETTING_KEYS = {
 }
 
 
-def _admin(membership: Membership):
-    if membership.role not in {"owner", "admin", "platform_admin"}:
-        raise HTTPException(status_code=403, detail="Organisation admin role required")
+def _has_permission(db: Session, membership: Membership, code: str) -> bool:
+    if membership.role == "platform_admin":
+        return True
+    return db.query(RolePermission.id).join(Permission, Permission.id == RolePermission.permission_id).filter(
+        RolePermission.organisation_id == membership.organisation_id,
+        RolePermission.role == membership.role,
+        Permission.code == code,
+    ).first() is not None
+
+
+def _admin(membership: Membership, db: Session):
+    if not _has_permission(db, membership, "org.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: org.manage")
+
+
+def _read(membership: Membership, db: Session, code: str = "org.read"):
+    if not _has_permission(db, membership, code):
+        raise HTTPException(status_code=403, detail=f"Missing permission: {code}")
 
 
 def _audit(db: Session, membership: Membership, action: str, resource: str, resource_id: str, detail: str):
@@ -96,12 +111,13 @@ class RolePermissionsUpdate(BaseModel):
 
 @router.get("/legal-entities")
 def list_legal_entities(membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
+    _read(membership, db)
     return db.query(LegalEntity).filter_by(organisation_id=membership.organisation_id).order_by(LegalEntity.legal_name).all()
 
 
 @router.post("/legal-entities", status_code=201)
 def create_legal_entity(payload: LegalEntityCreate, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership)
+    _admin(membership, db)
     data = payload.model_dump()
     data["code"] = data["code"].upper()
     if data["pan"]:
@@ -123,7 +139,7 @@ def create_legal_entity(payload: LegalEntityCreate, membership: Membership = Dep
 
 @router.put("/legal-entities/{entity_id}")
 def update_legal_entity(entity_id: int, payload: LegalEntityCreate, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership)
+    _admin(membership, db)
     entity = db.query(LegalEntity).filter_by(id=entity_id, organisation_id=membership.organisation_id).first()
     if not entity:
         raise HTTPException(status_code=404, detail="Legal entity not found")
@@ -147,12 +163,13 @@ def update_legal_entity(entity_id: int, payload: LegalEntityCreate, membership: 
 
 @router.get("/gst-registrations")
 def list_gst_registrations(membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
+    _read(membership, db)
     return db.query(GSTRegistration).filter_by(organisation_id=membership.organisation_id).order_by(GSTRegistration.gstin).all()
 
 
 @router.post("/gst-registrations", status_code=201)
 def create_gst_registration(payload: GSTRegistrationCreate, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership)
+    _admin(membership, db)
     gstin = payload.gstin.strip().upper()
     if not GSTIN_RE.fullmatch(gstin):
         raise HTTPException(status_code=422, detail="GSTIN format is invalid")
@@ -183,12 +200,13 @@ def create_gst_registration(payload: GSTRegistrationCreate, membership: Membersh
 
 @router.get("/financial-years")
 def list_financial_years(membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
+    _read(membership, db)
     return db.query(FinancialYear).filter_by(organisation_id=membership.organisation_id).order_by(FinancialYear.start_date.desc()).all()
 
 
 @router.post("/financial-years", status_code=201)
 def create_financial_year(payload: FinancialYearCreate, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership)
+    _admin(membership, db)
     if payload.end_date < payload.start_date:
         raise HTTPException(status_code=422, detail="End date must be on or after start date")
     overlap = db.query(FinancialYear).filter(
@@ -210,7 +228,7 @@ def create_financial_year(payload: FinancialYearCreate, membership: Membership =
 
 @router.put("/financial-years/{year_id}/current")
 def set_current_financial_year(year_id: int, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership)
+    _admin(membership, db)
     row = db.query(FinancialYear).filter_by(id=year_id, organisation_id=membership.organisation_id, is_closed=False).first()
     if not row:
         raise HTTPException(status_code=404, detail="Open financial year not found")
@@ -223,13 +241,14 @@ def set_current_financial_year(year_id: int, membership: Membership = Depends(or
 
 @router.get("/settings")
 def list_organisation_settings(membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
+    _read(membership, db)
     rows = db.query(OrganisationSetting).filter_by(organisation_id=membership.organisation_id).all()
     return {row.key: row.value for row in rows}
 
 
 @router.put("/settings/{key}")
 def update_organisation_setting(key: str, payload: SettingUpdate, membership: Membership = Depends(organisation_membership), user: User = Depends(current_user), db: Session = Depends(get_db)):
-    _admin(membership)
+    _admin(membership, db)
     if key not in SETTING_KEYS:
         raise HTTPException(status_code=400, detail="Setting key is not supported")
     if key == "financial_year_start_month" and payload.value not in {str(i) for i in range(1, 13)}:
@@ -250,13 +269,15 @@ def update_organisation_setting(key: str, payload: SettingUpdate, membership: Me
 
 @router.get("/users")
 def list_organisation_users(membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
+    _read(membership, db, "user.read")
     rows = db.query(Membership, User).join(User, User.id == Membership.user_id).filter(Membership.organisation_id == membership.organisation_id).order_by(User.full_name).all()
     return [{"user_id": user.id, "email": user.email, "full_name": user.full_name, "role": item.role, "is_active": user.is_active} for item, user in rows]
 
 
 @router.post("/invitations", status_code=201)
 def create_user_invitation(payload: InvitationCreate, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership)
+    if not _has_permission(db, membership, "user.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: user.manage")
     role = payload.role.strip().lower()
     if role not in ALLOWED_ROLES:
         raise HTTPException(status_code=422, detail="Role is not assignable through invitations")
@@ -304,7 +325,7 @@ def accept_user_invitation(payload: InvitationAccept, user: User = Depends(curre
 
 @router.get("/permissions")
 def list_permissions(membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership)
+    _admin(membership, db)
     permissions = db.query(Permission).order_by(Permission.code).all()
     assigned = db.query(RolePermission, Permission).join(Permission, Permission.id == RolePermission.permission_id).filter(RolePermission.organisation_id == membership.organisation_id).all()
     mapping: dict[str, list[str]] = {}

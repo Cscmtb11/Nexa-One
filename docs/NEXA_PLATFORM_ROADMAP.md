@@ -64,10 +64,10 @@ Still planned for a later phase:
 
 Phase 3.1 — payments and India GST foundations (implemented in phase-3-1 branch):
 - Customer receipts and supplier payments, posted as double-entry journals with financial-year validation.
-- Optional payment allocations to posted invoices/bills; unapplied amounts remain as party advances.
-- Customer receivable and supplier payable balances derived from the party subledger.
-- Organisation-scoped bank account ledger masters and bank statement line import.
-- Manual statement-to-payment matching with account, direction and amount validation; reconciliation summary.
+- Optional allocations to posted invoices/bills; unallocated customer receipts and supplier payments post to dedicated advance ledger accounts.
+- Customer receivables, supplier payables and advances are separated in the party subledger.
+- Organisation-scoped bank account ledger masters and manual bank statement line import.
+- Manual statement-to-payment matching validates bank account, credit/debit direction and amount; reconciliation summary shows matched/unmatched counts.
 - GST tax component split at document-line level: intra-state CGST/SGST and inter-state IGST based on the organisation's primary GST registration state and place of supply.
 - New bank, payment and GST component schema migration plus a finance/reconciliation workspace at /erp/finance.
 

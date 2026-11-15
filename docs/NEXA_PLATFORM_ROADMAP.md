@@ -62,12 +62,22 @@ Still planned for a later phase:
 - Facility-aware stock movement ledger and stock-on-hand query; posting blocks sales when tracked stock is insufficient.
 - New organisation registration provisions the ERP chart of accounts and GST tax-code catalogue.
 
-Phase 3 follow-on work still required before production accounting use:
-- GSTIN e-invoice/IRN, HSN/SAC rules, place-of-supply CGST/SGST/IGST split and return reconciliation.
-- Payment receipts, supplier payments, allocations, bank statement import and reconciliation.
+Phase 3.1 — payments and India GST foundations (implemented in phase-3-1 branch):
+- Customer receipts and supplier payments, posted as double-entry journals with financial-year validation.
+- Optional payment allocations to posted invoices/bills; unapplied amounts remain as party advances.
+- Customer receivable and supplier payable balances derived from the party subledger.
+- Organisation-scoped bank account ledger masters and bank statement line import.
+- Manual statement-to-payment matching with account, direction and amount validation; reconciliation summary.
+- GST tax component split at document-line level: intra-state CGST/SGST and inter-state IGST based on the organisation's primary GST registration state and place of supply.
+- New bank, payment and GST component schema migration plus a finance/reconciliation workspace at /erp/finance.
+
+Remaining before production accounting use:
+- GSTIN e-invoice/IRN integration, live HSN/SAC and rate validation, GST return generation and reconciliation with portal data.
+- Automated bank statement file import (CSV/OFX/API), opening balances, fees, interest, reversals and unmatched transaction workflow.
 - Weighted-average/FIFO valuation, COGS posting, stock transfers, adjustments, batch/serial and expiry.
 - Purchase orders, sales orders, approval workflows, attachments, credit/debit notes and document numbering sequences.
-- Financial statements, trial balance, receivables/payables ageing and period close controls.
+- Financial statements, trial balance, receivables/payables ageing, advances settlement and period close controls.
+- External accountant review and regulatory validation before live filing or statutory use.
 
 ### Phase 4 — Healthcare
 - Patient master index, registration, consent and appointments.

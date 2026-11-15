@@ -74,7 +74,7 @@ Phase 3.1 — payments and India GST foundations (implemented in phase-3-1 branc
 Remaining before production accounting use:
 - GSTIN e-invoice/IRN integration, live HSN/SAC and rate validation, GST return generation and reconciliation with portal data.
 - Automated bank statement file import (CSV/OFX/API), opening balances, fees, interest, reversals and unmatched transaction workflow.
-- Stock transfers, adjustments, batch/serial and expiry. Phase 3.3 adds FIFO issue costing, COGS journals and FIFO inventory valuation; legacy stock history should be reviewed before relying on historical values.
+- Batch/serial and expiry tracking; purchase/sales orders, approvals, attachments, credit/debit notes and document numbering sequences. Phase 3.3 adds FIFO issue costing, COGS journals and FIFO inventory valuation; Phase 3.4 adds facility transfers and value-accounted stock adjustments.
 - Purchase orders, sales orders, approval workflows, attachments, credit/debit notes and document numbering sequences.
 - Financial statements, trial balance, receivables/payables ageing, advances settlement and period close controls.
 - External accountant review and regulatory validation before live filing or statutory use.
@@ -86,6 +86,14 @@ Phase 3.3 — inventory costing foundation (implementation branch):
 - Inventory valuation endpoint reports FIFO quantity and value by item/facility.
 - Backdated stock postings are blocked when they would rewrite an existing FIFO sequence; inconsistent legacy stock history is rejected for reconciliation.
 - FIFO is not a substitute for opening-stock migration or accountant-approved valuation review. GST input tax, freight/landed cost, returns and stock adjustments require later dedicated workflows.
+
+
+Phase 3.4 — facility stock operations (implementation branch):
+- Transfer tracked goods between two active facilities within the same organisation, preserving FIFO cost and recording paired source/destination ledger movements.
+- Post increase/decrease stock adjustments with a mandatory reason and audit event; increases require a supplied unit cost and decreases consume FIFO layers.
+- Stock adjustment gains/losses create balanced journals against dedicated inventory adjustment gain/write-off accounts.
+- Operations are dated, reference-numbered and restricted to open financial years where financial years are configured. Backdated operations are rejected to protect FIFO chronology.
+- Transfers are internal movements and do not create income/expense journals. One item is handled per operation in this first slice.
 
 ### Phase 4 — Healthcare
 - Patient master index, registration, consent and appointments.

@@ -4,7 +4,7 @@ from .db import Base, engine
 from .settings import settings
 from .routers import auth, organisations, facilities, modules, tenant_admin, erp, erp_reports
 
-app = FastAPI(title=settings.app_name, version="0.8.0")
+app = FastAPI(title=settings.app_name, version="0.9.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,7 +21,7 @@ def startup():
 
 @app.get("/health")
 def health():
-    return {"service":"nexa-api","status":"ok","environment":settings.environment,"ai_enabled":settings.ai_enabled,"version":"0.8.0"}
+    return {"service":"nexa-api","status":"ok","environment":settings.environment,"ai_enabled":settings.ai_enabled,"version":"0.9.0"}
 
 app.include_router(auth.router)
 app.include_router(organisations.router)

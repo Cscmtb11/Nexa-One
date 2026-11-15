@@ -10,8 +10,17 @@ from ..models import ERPAccount, ERPJournalEntry, ERPJournalLine, ERPItem, ERPSt
 router = APIRouter(prefix="/v1/erp/reports", tags=["ERP reports"])
 
 
-def normal_side(account_type: str) -> str:
-    return "debit" if account_type in {"asset", "expense"} else "credit"
+def _trial_balance_sides(debit: Decimal, credit: Decimal) -> tuple[Decimal, Decimal]:
+    net = debit - credit
+    return max(net, Decimal("0")), max(-net, Decimal("0"))
+
+
+def _profit_loss_amount(account_type: str, debit: Decimal, credit: Decimal) -> Decimal:
+    if account_type == "income":
+        return credit - debit
+    if account_type == "expense":
+        return debit - credit
+    return Decimal("0")
 
 
 def _ledger_rows(db: Session, organisation_id: int, end_date: date, start_date: date | None = None):
@@ -66,9 +75,7 @@ def trial_balance(
     total_debit = Decimal("0")
     total_credit = Decimal("0")
     for row in rows:
-        net = row["debit"] - row["credit"]
-        debit_balance = max(net, Decimal("0"))
-        credit_balance = max(-net, Decimal("0"))
+        debit_balance, credit_balance = _trial_balance_sides(row["debit"], row["credit"])
         total_debit += debit_balance
         total_credit += credit_balance
         result.append({
@@ -103,11 +110,11 @@ def profit_and_loss(
     total_expenses = Decimal("0")
     for row in rows:
         if row["account_type"] == "income":
-            amount = row["credit"] - row["debit"]
+            amount = _profit_loss_amount("income", row["debit"], row["credit"])
             income.append({"account_code": row["account_code"], "account_name": row["account_name"], "amount": _amount(amount)})
             total_income += amount
         elif row["account_type"] == "expense":
-            amount = row["debit"] - row["credit"]
+            amount = _profit_loss_amount("expense", row["debit"], row["credit"])
             expenses.append({"account_code": row["account_code"], "account_name": row["account_name"], "amount": _amount(amount)})
             total_expenses += amount
     return {
@@ -149,9 +156,9 @@ def balance_sheet(
             equity.append({"account_code": row["account_code"], "account_name": row["account_name"], "amount": _amount(amount)})
             total_equity += amount
         elif row["account_type"] == "income":
-            current_earnings += row["credit"] - row["debit"]
+            current_earnings += _profit_loss_amount("income", row["debit"], row["credit"])
         elif row["account_type"] == "expense":
-            current_earnings -= row["debit"] - row["credit"]
+            current_earnings -= _profit_loss_amount("expense", row["debit"], row["credit"])
     total_equity += current_earnings
     return {
         "as_of": as_of.isoformat(),

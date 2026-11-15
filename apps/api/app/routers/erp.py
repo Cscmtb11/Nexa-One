@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from ..db import get_db
+from ..inventory_costing import replay_fifo_layers, issue_fifo_layers, fifo_layer_totals
 from ..dependencies import current_user, require_org_permission
 from ..models import (
     AuditEvent, ERPAccount, ERPDocument, ERPDocumentLine, ERPItem, ERPJournalEntry,
@@ -258,17 +259,45 @@ def post_document(document_id:int,m:Membership=Depends(require_org_permission("e
         if cgst_total: jl(tax_accounts["cgst"],credit=cgst_total)
         if sgst_total: jl(tax_accounts["sgst"],credit=sgst_total)
         if igst_total: jl(tax_accounts["igst"],credit=igst_total)
+    fifo_layers_by_item = {}
+    cogs_total = Decimal("0.00")
+    inventory_account = _account(db,org,"1200")
+    cogs_account = _account(db,org,"5000")
     for line in lines:
-        item=db.query(ERPItem).filter_by(id=line.item_id,organisation_id=org).first()
+        item=db.query(ERPItem).filter_by(id=line.item_id,organisation_id=org).with_for_update().first()
         if item.track_stock and item.item_type=="goods":
-            current=db.query(func.coalesce(func.sum(ERPStockLedger.quantity_in-ERPStockLedger.quantity_out),0)).filter(
-                ERPStockLedger.organisation_id==org,ERPStockLedger.item_id==item.id,
-                ERPStockLedger.facility_id==doc.facility_id).scalar() or 0
-            if not inbound and Decimal(current)<Decimal(line.quantity):
-                db.rollback();raise HTTPException(409,detail=f"Insufficient stock for {item.item_code}; available {current}")
+            if item.id not in fifo_layers_by_item:
+                history=db.query(ERPStockLedger).filter(
+                    ERPStockLedger.organisation_id==org,ERPStockLedger.item_id==item.id,
+                    ERPStockLedger.facility_id==doc.facility_id).order_by(
+                    ERPStockLedger.movement_date,ERPStockLedger.id).with_for_update().all()
+                if history and doc.issue_date < history[-1].movement_date:
+                    db.rollback()
+                    raise HTTPException(409,detail=f"Backdated stock posting is not allowed for {item.item_code}; latest movement is {history[-1].movement_date}")
+                try:
+                    fifo_layers_by_item[item.id]=replay_fifo_layers(history)
+                except ValueError as exc:
+                    db.rollback()
+                    raise HTTPException(409,detail=f"Existing stock history for {item.item_code} needs reconciliation: {exc}")
+            layers=fifo_layers_by_item[item.id]
+            if inbound:
+                net_unit_cost=Decimal(line.taxable_amount)/Decimal(line.quantity)
+                layers.append({"quantity":Decimal(line.quantity),"unit_cost":net_unit_cost})
+                movement_cost=money(net_unit_cost)
+            else:
+                try:
+                    movement_cost=issue_fifo_layers(layers,Decimal(line.quantity))
+                except ValueError:
+                    available=sum((x["quantity"] for x in layers),Decimal("0"))
+                    db.rollback()
+                    raise HTTPException(409,detail=f"Insufficient FIFO stock for {item.item_code}; available {available}")
+                cogs_total += movement_cost
             db.add(ERPStockLedger(organisation_id=org,facility_id=doc.facility_id,item_id=item.id,document_id=doc.id,
                 movement_date=doc.issue_date,quantity_in=line.quantity if inbound else 0,
-                quantity_out=0 if inbound else line.quantity,unit_cost=line.unit_price))
+                quantity_out=0 if inbound else line.quantity,unit_cost=movement_cost if inbound else money(movement_cost/Decimal(line.quantity)))
+    if not inbound and cogs_total:
+        jl(cogs_account,debit=money(cogs_total))
+        jl(inventory_account,credit=money(cogs_total))
     # Assert the journal is balanced before the transaction is committed.
     debit=sum((Decimal(x.debit) for x in db.query(ERPJournalLine).filter_by(journal_entry_id=journal.id).all()),Decimal("0"))
     credit=sum((Decimal(x.credit) for x in db.query(ERPJournalLine).filter_by(journal_entry_id=journal.id).all()),Decimal("0"))
@@ -287,6 +316,32 @@ def stock_balances(facility_id:int|None=None,m:Membership=Depends(require_org_pe
     if facility_id is not None:q=q.filter(ERPStockLedger.facility_id==facility_id)
     rows=q.group_by(ERPStockLedger.item_id,ERPItem.item_code,ERPItem.name,ERPStockLedger.facility_id).order_by(ERPItem.item_code).all()
     return [{"item_id":r.item_id,"item_code":r.item_code,"name":r.name,"facility_id":r.facility_id,"quantity_on_hand":str(r.quantity_on_hand)} for r in rows]
+
+
+@router.get("/inventory-valuation")
+def inventory_valuation(facility_id:int|None=None,m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):
+    q=db.query(ERPStockLedger).filter(ERPStockLedger.organisation_id==m.organisation_id)
+    if facility_id is not None:
+        if not db.query(Facility.id).filter_by(id=facility_id,organisation_id=m.organisation_id,is_active=True).first():
+            raise HTTPException(404,detail="Facility not found")
+        q=q.filter(ERPStockLedger.facility_id==facility_id)
+    rows=q.order_by(ERPStockLedger.item_id,ERPStockLedger.facility_id,ERPStockLedger.movement_date,ERPStockLedger.id).all()
+    grouped={}
+    for row in rows:
+        key=(row.item_id,row.facility_id)
+        grouped.setdefault(key,[]).append(row)
+    result=[]
+    for (item_id,site_id),movements in grouped.items():
+        try:
+            layers=replay_fifo_layers(movements)
+        except ValueError as exc:
+            raise HTTPException(409,detail=f"Stock history for item {item_id} needs reconciliation: {exc}")
+        quantity,value=fifo_layer_totals(layers)
+        item=db.query(ERPItem).filter_by(id=item_id,organisation_id=m.organisation_id).first()
+        result.append({"item_id":item_id,"item_code":item.item_code,"name":item.name,
+            "facility_id":site_id,"quantity_on_hand":str(quantity),"inventory_value":str(value),
+            "valuation_method":"FIFO"})
+    return result
 
 @router.get("/journals")
 def list_journals(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):

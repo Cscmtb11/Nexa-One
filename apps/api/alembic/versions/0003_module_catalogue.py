@@ -16,7 +16,7 @@ def upgrade():
     op.create_table(
         "module_catalog",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("key", sa.String(100), nullable=False, unique=True),
+        sa.Column("key", sa.String(100), nullable=False),
         sa.Column("name", sa.String(160), nullable=False),
         sa.Column("industry", sa.String(80), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),

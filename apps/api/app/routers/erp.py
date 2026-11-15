@@ -11,7 +11,7 @@ from ..models import (
     AuditEvent, ERPAccount, ERPDocument, ERPDocumentLine, ERPItem, ERPJournalEntry,
     ERPJournalLine, ERPParty, ERPStockLedger, ERPTaxCode, FinancialYear, Facility,
     GSTRegistration, ERPPayment, ERPPaymentAllocation, ERPBankAccount, ERPBankStatementLine,
-    Membership, User,
+    Membership, User, ERPStockOperation,
 )
 
 router = APIRouter(prefix="/v1/erp", tags=["shared ERP"])
@@ -106,6 +106,26 @@ class DocumentIn(BaseModel):
     due_date: date | None = None
     place_of_supply_state: str | None = Field(default=None, pattern="^[0-9]{2}$")
     lines: list[DocumentLineIn] = Field(min_length=1, max_length=200)
+
+
+class StockTransferIn(BaseModel):
+    reference_no: str = Field(min_length=1, max_length=60)
+    item_id: int
+    source_facility_id: int
+    destination_facility_id: int
+    quantity: Decimal = Field(gt=0, le=100000000)
+    operation_date: date
+    reason: str = Field(min_length=3, max_length=250)
+
+class StockAdjustmentIn(BaseModel):
+    reference_no: str = Field(min_length=1, max_length=60)
+    item_id: int
+    facility_id: int
+    direction: str = Field(pattern="^(increase|decrease)$")
+    quantity: Decimal = Field(gt=0, le=100000000)
+    unit_cost: Decimal | None = Field(default=None, ge=0, le=1000000000)
+    operation_date: date
+    reason: str = Field(min_length=3, max_length=250)
 
 def _audit(db, membership, user, action, resource, rid, detail):
     db.add(AuditEvent(organisation_id=membership.organisation_id, actor_user_id=user.id,
@@ -342,6 +362,123 @@ def inventory_valuation(facility_id:int|None=None,m:Membership=Depends(require_o
             "facility_id":site_id,"quantity_on_hand":str(quantity),"inventory_value":str(value),
             "valuation_method":"FIFO"})
     return result
+
+
+@router.get("/stock-operations")
+def list_stock_operations(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):
+    return db.query(ERPStockOperation).filter_by(organisation_id=m.organisation_id).order_by(
+        ERPStockOperation.operation_date.desc(),ERPStockOperation.id.desc()).limit(500).all()
+
+
+def _stock_history(db, org_id, item_id, facility_id):
+    return db.query(ERPStockLedger).filter_by(organisation_id=org_id,item_id=item_id,facility_id=facility_id).order_by(
+        ERPStockLedger.movement_date,ERPStockLedger.id).with_for_update().all()
+
+
+def _check_stock_operation_date(db, org_id, operation_date):
+    years=db.query(FinancialYear.id).filter_by(organisation_id=org_id).first()
+    if years:
+        fy=db.query(FinancialYear).filter(FinancialYear.organisation_id==org_id,
+            FinancialYear.start_date<=operation_date,FinancialYear.end_date>=operation_date).first()
+        if not fy or fy.is_closed:
+            raise HTTPException(409,detail="Operation date is outside an open financial year")
+
+
+@router.post("/stock-transfers",status_code=201)
+def transfer_stock(p:StockTransferIn,m:Membership=Depends(require_org_permission("erp.manage")),
+                   u:User=Depends(current_user),db:Session=Depends(get_db)):
+    org=m.organisation_id
+    if p.source_facility_id==p.destination_facility_id:
+        raise HTTPException(422,detail="Source and destination facilities must be different")
+    if db.query(ERPStockOperation.id).filter_by(organisation_id=org,reference_no=p.reference_no).first():
+        raise HTTPException(409,detail="Stock operation reference already exists")
+    item=db.query(ERPItem).filter_by(id=p.item_id,organisation_id=org,is_active=True).with_for_update().first()
+    if not item or item.item_type!="goods" or not item.track_stock:
+        raise HTTPException(422,detail="Select an active stock-tracked goods item belonging to this organisation")
+    facilities=db.query(Facility).filter(Facility.organisation_id==org,Facility.is_active.is_(True),
+        Facility.id.in_([p.source_facility_id,p.destination_facility_id])).all()
+    if len(facilities)!=2:
+        raise HTTPException(422,detail="Both facilities must be active and belong to this organisation")
+    _check_stock_operation_date(db,org,p.operation_date)
+    source=_stock_history(db,org,item.id,p.source_facility_id)
+    destination=_stock_history(db,org,item.id,p.destination_facility_id)
+    for history in (source,destination):
+        if history and p.operation_date<history[-1].movement_date:
+            raise HTTPException(409,detail=f"Backdated transfer is not allowed; latest stock movement is {history[-1].movement_date}")
+    try:
+        source_layers=replay_fifo_layers(source)
+        replay_fifo_layers(destination)
+        transfer_cost=issue_fifo_layers(source_layers,p.quantity)
+    except ValueError as exc:
+        raise HTTPException(409,detail=str(exc))
+    average_cost=money(transfer_cost/Decimal(p.quantity))
+    operation=ERPStockOperation(organisation_id=org,reference_no=p.reference_no,operation_type="transfer",
+        item_id=item.id,source_facility_id=p.source_facility_id,destination_facility_id=p.destination_facility_id,
+        quantity=p.quantity,unit_cost=average_cost,total_cost=transfer_cost,operation_date=p.operation_date,
+        reason=p.reason,created_by_user_id=u.id)
+    db.add(operation);db.flush()
+    db.add_all([
+        ERPStockLedger(organisation_id=org,facility_id=p.source_facility_id,item_id=item.id,
+            stock_operation_id=operation.id,movement_date=p.operation_date,quantity_in=0,quantity_out=p.quantity,unit_cost=average_cost),
+        ERPStockLedger(organisation_id=org,facility_id=p.destination_facility_id,item_id=item.id,
+            stock_operation_id=operation.id,movement_date=p.operation_date,quantity_in=p.quantity,quantity_out=0,unit_cost=average_cost)
+    ])
+    _audit(db,m,u,"erp.stock.transferred","erp_stock_operation",operation.id,
+        f"Transferred {p.quantity} {item.unit} of {item.item_code} from facility {p.source_facility_id} to {p.destination_facility_id}; FIFO cost {transfer_cost}")
+    db.commit();db.refresh(operation);return operation
+
+
+@router.post("/stock-adjustments",status_code=201)
+def adjust_stock(p:StockAdjustmentIn,m:Membership=Depends(require_org_permission("erp.manage")),
+                 u:User=Depends(current_user),db:Session=Depends(get_db)):
+    org=m.organisation_id
+    if db.query(ERPStockOperation.id).filter_by(organisation_id=org,reference_no=p.reference_no).first():
+        raise HTTPException(409,detail="Stock operation reference already exists")
+    item=db.query(ERPItem).filter_by(id=p.item_id,organisation_id=org,is_active=True).with_for_update().first()
+    if not item or item.item_type!="goods" or not item.track_stock:
+        raise HTTPException(422,detail="Select an active stock-tracked goods item belonging to this organisation")
+    if not db.query(Facility.id).filter_by(id=p.facility_id,organisation_id=org,is_active=True).first():
+        raise HTTPException(422,detail="Facility does not belong to this organisation")
+    if p.direction=="increase" and p.unit_cost is None:
+        raise HTTPException(422,detail="Unit cost is required for a stock increase")
+    _check_stock_operation_date(db,org,p.operation_date)
+    history=_stock_history(db,org,item.id,p.facility_id)
+    if history and p.operation_date<history[-1].movement_date:
+        raise HTTPException(409,detail=f"Backdated adjustment is not allowed; latest stock movement is {history[-1].movement_date}")
+    try:
+        layers=replay_fifo_layers(history)
+        if p.direction=="decrease":
+            total_cost=issue_fifo_layers(layers,p.quantity)
+            unit_cost=money(total_cost/Decimal(p.quantity))
+        else:
+            unit_cost=money(p.unit_cost)
+            total_cost=money(Decimal(p.quantity)*unit_cost)
+    except ValueError as exc:
+        raise HTTPException(409,detail=str(exc))
+    operation=ERPStockOperation(organisation_id=org,reference_no=p.reference_no,operation_type="adjustment",
+        item_id=item.id,source_facility_id=p.facility_id,adjustment_direction=p.direction,
+        quantity=p.quantity,unit_cost=unit_cost,total_cost=total_cost,operation_date=p.operation_date,
+        reason=p.reason,created_by_user_id=u.id)
+    db.add(operation);db.flush()
+    inventory=_account(db,org,"1200")
+    counterpart=_account(db,org,"4100" if p.direction=="increase" else "5100")
+    journal=ERPJournalEntry(organisation_id=org,entry_no=f"STK-{p.reference_no}",entry_date=p.operation_date,
+        narration=f"Stock adjustment {p.reference_no}: {p.reason}",posted_by_user_id=u.id)
+    db.add(journal);db.flush()
+    if p.direction=="increase":
+        db.add_all([ERPJournalLine(journal_entry_id=journal.id,account_id=inventory.id,debit=total_cost,credit=0),
+                    ERPJournalLine(journal_entry_id=journal.id,account_id=counterpart.id,debit=0,credit=total_cost)])
+        db.add(ERPStockLedger(organisation_id=org,facility_id=p.facility_id,item_id=item.id,
+            stock_operation_id=operation.id,movement_date=p.operation_date,quantity_in=p.quantity,quantity_out=0,unit_cost=unit_cost))
+    else:
+        db.add_all([ERPJournalLine(journal_entry_id=journal.id,account_id=counterpart.id,debit=total_cost,credit=0),
+                    ERPJournalLine(journal_entry_id=journal.id,account_id=inventory.id,debit=0,credit=total_cost)])
+        db.add(ERPStockLedger(organisation_id=org,facility_id=p.facility_id,item_id=item.id,
+            stock_operation_id=operation.id,movement_date=p.operation_date,quantity_in=0,quantity_out=p.quantity,unit_cost=unit_cost))
+    operation.journal_entry_id=journal.id
+    _audit(db,m,u,"erp.stock.adjusted","erp_stock_operation",operation.id,
+        f"Stock {p.direction} of {p.quantity} {item.unit} {item.item_code} at facility {p.facility_id}; value {total_cost}; reason: {p.reason}")
+    db.commit();db.refresh(operation);return operation
 
 @router.get("/journals")
 def list_journals(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):

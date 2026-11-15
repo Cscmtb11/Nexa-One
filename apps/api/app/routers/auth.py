@@ -23,6 +23,8 @@ def _seed_organisation_defaults(db: Session, organisation_id: int):
         "user.read": "View organisation users",
         "user.manage": "Manage organisation users",
         "audit.read": "View audit events",
+        "erp.read": "View ERP masters, documents, stock and ledger",
+        "erp.manage": "Manage ERP masters and post business documents",
     }
     by_code = {permission.code: permission for permission in db.query(Permission).all()}
     for code, description in permission_catalog.items():
@@ -34,11 +36,11 @@ def _seed_organisation_defaults(db: Session, organisation_id: int):
     role_grants = {
         "owner": set(by_code),
         "admin": set(by_code) - {"org.manage"},
-        "manager": {"org.read", "facility.read", "user.read", "audit.read"},
-        "accountant": {"org.read", "facility.read"},
-        "clinician": {"org.read", "facility.read"},
-        "technician": {"org.read", "facility.read"},
-        "member": {"org.read", "facility.read"},
+        "manager": {"org.read", "facility.read", "user.read", "audit.read", "erp.read", "erp.manage"},
+        "accountant": {"org.read", "facility.read", "erp.read", "erp.manage"},
+        "clinician": {"org.read", "facility.read", "erp.read"},
+        "technician": {"org.read", "facility.read", "erp.read"},
+        "member": {"org.read", "facility.read", "erp.read"},
     }
     for role, codes in role_grants.items():
         for code in codes:

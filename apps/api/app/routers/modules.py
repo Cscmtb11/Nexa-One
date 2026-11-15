@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..dependencies import current_user, organisation_membership
+from ..dependencies import current_user, require_org_permission
 from ..models import AuditEvent, ModuleCatalog, OrganisationModule, Membership, User
 
 router = APIRouter(prefix="/v1/modules", tags=["modules"])
@@ -32,7 +32,7 @@ def list_module_catalog(
 
 @router.get("/enabled")
 def list_enabled_modules(
-    membership: Membership = Depends(organisation_membership),
+    membership: Membership = Depends(require_org_permission("org.read")),
     db: Session = Depends(get_db),
 ):
     """Return modules enabled for the organisation selected by X-Org-Id."""
@@ -53,12 +53,9 @@ def list_enabled_modules(
 @router.put("/{module_key}/enable")
 def enable_module(
     module_key: str,
-    membership: Membership = Depends(organisation_membership),
+    membership: Membership = Depends(require_org_permission("org.manage")),
     db: Session = Depends(get_db),
 ):
-    if membership.role not in {"owner", "admin", "platform_admin"}:
-        raise HTTPException(status_code=403, detail="Organisation admin role required")
-
     module = db.query(ModuleCatalog).filter_by(key=module_key, is_active=True).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -91,7 +88,7 @@ def enable_module(
 @router.put("/{module_key}/disable")
 def disable_module(
     module_key: str,
-    membership: Membership = Depends(organisation_membership),
+    membership: Membership = Depends(require_org_permission("org.manage")),
     db: Session = Depends(get_db),
 ):
     if membership.role not in {"owner", "admin", "platform_admin"}:

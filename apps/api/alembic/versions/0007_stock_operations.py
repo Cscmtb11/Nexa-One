@@ -53,10 +53,10 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("DELETE FROM erp_accounts WHERE account_code IN ('4100','5100') AND is_system=TRUE")
-    for column in ["destination_facility_id", "source_facility_id", "item_id", "organisation_id"]:
-        op.drop_index(f"ix_erp_stock_operations_{column}", table_name="erp_stock_operations")
-    op.drop_table("erp_stock_operations")
+    op.execute("DELETE FROM erp_stock_ledger WHERE stock_operation_id IS NOT NULL")
     op.drop_index("ix_erp_stock_ledger_stock_operation_id", table_name="erp_stock_ledger")
     op.drop_column("erp_stock_ledger", "stock_operation_id")
     op.alter_column("erp_stock_ledger", "document_id", existing_type=sa.Integer(), nullable=False)
+    for column in ["destination_facility_id", "source_facility_id", "item_id", "organisation_id"]:
+        op.drop_index(f"ix_erp_stock_operations_{column}", table_name="erp_stock_operations")
+    op.drop_table("erp_stock_operations")

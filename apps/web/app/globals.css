@@ -55,3 +55,7 @@
 .permission-check small{font-size:10px;color:#718096;line-height:1.4}
 .admin-note code{display:block;margin-top:7px;overflow-wrap:anywhere;color:#123b63;background:#fff;padding:9px;border-radius:6px}
 @media(max-width:600px){.permission-list{grid-template-columns:1fr}}
+
+.admin-user-actions{display:flex;gap:6px;align-items:center;min-width:190px}
+.admin-user-actions select{height:30px;border:1px solid #dce5ee;border-radius:6px;background:#fff;font-size:10px;padding:0 5px;max-width:105px}
+.admin-danger{border:1px solid #f0d2d2;background:#fff7f7;color:#b44343;border-radius:6px;padding:7px 8px;font-size:10px;font-weight:700}

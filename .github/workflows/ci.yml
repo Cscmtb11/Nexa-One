@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r apps/api/requirements.txt
       - run: python -m compileall apps/api/app apps/api/alembic
-      - run: cd apps/api && pytest -q
+      - run: cd apps/api && PYTHONPATH=. pytest -q
 
   web:
     runs-on: ubuntu-latest

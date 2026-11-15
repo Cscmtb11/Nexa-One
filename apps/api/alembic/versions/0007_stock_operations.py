@@ -13,11 +13,6 @@ depends_on = None
 
 
 def upgrade():
-    op.alter_column("erp_stock_ledger", "document_id", existing_type=sa.Integer(), nullable=True)
-    op.add_column("erp_stock_ledger", sa.Column("stock_operation_id", sa.Integer(),
-        sa.ForeignKey("erp_stock_operations.id"), nullable=True))
-    op.create_index("ix_erp_stock_ledger_stock_operation_id", "erp_stock_ledger", ["stock_operation_id"])
-
     op.create_table("erp_stock_operations",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organisation_id", sa.Integer(), sa.ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False),
@@ -36,6 +31,14 @@ def upgrade():
         sa.Column("journal_entry_id", sa.Integer(), sa.ForeignKey("erp_journal_entries.id"), unique=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.UniqueConstraint("organisation_id", "reference_no", name="uq_erp_stock_operation_org_ref"))
+    for column in ["organisation_id", "item_id", "source_facility_id", "destination_facility_id"]:
+        op.create_index(f"ix_erp_stock_operations_{column}", "erp_stock_operations", [column])
+
+    op.alter_column("erp_stock_ledger", "document_id", existing_type=sa.Integer(), nullable=True)
+    op.add_column("erp_stock_ledger", sa.Column("stock_operation_id", sa.Integer(),
+        sa.ForeignKey("erp_stock_operations.id"), nullable=True))
+    op.create_index("ix_erp_stock_ledger_stock_operation_id", "erp_stock_ledger", ["stock_operation_id"])
+
     for column in ["organisation_id", "item_id", "source_facility_id", "destination_facility_id"]:
         op.create_index(f"ix_erp_stock_operations_{column}", "erp_stock_operations", [column])
 

@@ -21,6 +21,9 @@ def _seed_organisation_defaults(db: Session, organisation_id: int):
         "owner": set(by_code),
         "admin": set(by_code) - {"org.manage"},
         "manager": {"org.read", "facility.read", "user.read", "audit.read"},
+        "accountant": {"org.read", "facility.read"},
+        "clinician": {"org.read", "facility.read"},
+        "technician": {"org.read", "facility.read"},
         "member": {"org.read", "facility.read"},
     }
     for role, codes in role_grants.items():

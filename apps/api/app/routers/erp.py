@@ -187,7 +187,7 @@ def create_document(p: DocumentIn,m: Membership=Depends(require_org_permission("
         registration_q=registration_q.filter(GSTRegistration.facility_id.is_(None))
     seller_registration=registration_q.order_by(GSTRegistration.facility_id.desc()).first()
     seller_state=seller_registration.state_code if seller_registration else None
-    place_state=p.place_of_supply_state or party.state_code
+    place_state=p.place_of_supply_state or (party.state_code if p.document_type=="sales_invoice" else seller_state)
     doc=ERPDocument(organisation_id=org,facility_id=p.facility_id,party_id=party.id,document_type=p.document_type,
         document_no=p.document_no,issue_date=p.issue_date,due_date=p.due_date,place_of_supply_state=place_state,
         created_by_user_id=u.id,status="draft")
@@ -320,6 +320,9 @@ def list_payments(m: Membership=Depends(require_org_permission("erp.read")), db:
 def create_payment(p: PaymentIn,m: Membership=Depends(require_org_permission("erp.manage")),
                    u: User=Depends(current_user),db: Session=Depends(get_db)):
     org=m.organisation_id
+    fy=db.query(FinancialYear).filter(FinancialYear.organisation_id==org,FinancialYear.start_date<=p.payment_date,FinancialYear.end_date>=p.payment_date).first()
+    if db.query(FinancialYear.id).filter_by(organisation_id=org).first() and (not fy or fy.is_closed):
+        raise HTTPException(409,detail="Payment date is outside an open financial year")
     party=db.query(ERPParty).filter_by(id=p.party_id,organisation_id=org,is_active=True).first()
     expected="customer" if p.payment_type=="customer_receipt" else "supplier"
     if not party or party.party_type not in {expected,"both"}:

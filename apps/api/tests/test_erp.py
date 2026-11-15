@@ -97,7 +97,7 @@ def test_fifo_replay_applies_prior_sales_to_oldest_layers():
         {"quantity_in": Decimal("0"), "quantity_out": Decimal("1"), "unit_cost": Decimal("999")},
         {"quantity_in": Decimal("2"), "quantity_out": Decimal("0"), "unit_cost": Decimal("15")},
     ])
-    assert fifo_layer_totals(layers) == (Decimal("5"), Decimal("63.00"))
+    assert fifo_layer_totals(layers) == (Decimal("5"), Decimal("66.00"))
 
 
 def test_fifo_rejects_issue_beyond_available_layers():

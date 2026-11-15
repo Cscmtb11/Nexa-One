@@ -325,7 +325,7 @@ def accept_user_invitation(payload: InvitationAccept, user: User = Depends(curre
 
 @router.get("/permissions")
 def list_permissions(membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
-    _admin(membership, db)
+    _read(membership, db, "user.read")
     permissions = db.query(Permission).order_by(Permission.code).all()
     assigned = db.query(RolePermission, Permission).join(Permission, Permission.id == RolePermission.permission_id).filter(RolePermission.organisation_id == membership.organisation_id).all()
     mapping: dict[str, list[str]] = {}

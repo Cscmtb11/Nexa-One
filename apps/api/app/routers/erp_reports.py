@@ -210,7 +210,7 @@ def stock_movements(
             "quantity_out": str(row.quantity_out),
             "net_quantity": str(Decimal(row.quantity_in or 0) - Decimal(row.quantity_out or 0)),
             "receipt_cost": _amount(Decimal(row.receipt_cost or 0)),
-            "issue_cost_at_recorded_rate": _amount(Decimal(row.issue_cost_at_recorded_rate or 0)),
+            "issue_value_at_recorded_rate": _amount(Decimal(row.issue_value_at_recorded_rate or 0)),
         }
         for row in rows
     ]

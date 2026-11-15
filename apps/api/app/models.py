@@ -163,3 +163,134 @@ class UserInvitation(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# Shared ERP engines (Phase 3)
+from decimal import Decimal
+from sqlalchemy import Numeric
+
+class ERPParty(Base):
+    __tablename__ = "erp_parties"
+    __table_args__ = (UniqueConstraint("organisation_id", "party_code", name="uq_erp_party_org_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    party_code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(200))
+    party_type: Mapped[str] = mapped_column(String(20))
+    gstin: Mapped[str | None] = mapped_column(String(15))
+    pan: Mapped[str | None] = mapped_column(String(10))
+    email: Mapped[str | None] = mapped_column(String(320))
+    phone: Mapped[str | None] = mapped_column(String(30))
+    address: Mapped[str | None] = mapped_column(Text)
+    state_code: Mapped[str | None] = mapped_column(String(2))
+    credit_days: Mapped[int] = mapped_column(default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class ERPItem(Base):
+    __tablename__ = "erp_items"
+    __table_args__ = (UniqueConstraint("organisation_id", "item_code", name="uq_erp_item_org_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    item_code: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(String(200))
+    item_type: Mapped[str] = mapped_column(String(20), default="goods")
+    unit: Mapped[str] = mapped_column(String(20), default="Nos")
+    hsn_sac: Mapped[str | None] = mapped_column(String(20))
+    default_tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 3), default=0)
+    purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    selling_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    track_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class ERPTaxCode(Base):
+    __tablename__ = "erp_tax_codes"
+    __table_args__ = (UniqueConstraint("organisation_id", "code", name="uq_erp_tax_org_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    code: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str] = mapped_column(String(100))
+    rate: Mapped[Decimal] = mapped_column(Numeric(7, 3), default=0)
+    is_exempt: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+class ERPDocument(Base):
+    __tablename__ = "erp_documents"
+    __table_args__ = (UniqueConstraint("organisation_id", "document_no", name="uq_erp_doc_org_no"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    facility_id: Mapped[int | None] = mapped_column(ForeignKey("facilities.id", ondelete="SET NULL"), nullable=True, index=True)
+    party_id: Mapped[int] = mapped_column(ForeignKey("erp_parties.id"), index=True)
+    document_type: Mapped[str] = mapped_column(String(30))
+    document_no: Mapped[str] = mapped_column(String(60))
+    issue_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    place_of_supply_state: Mapped[str | None] = mapped_column(String(2))
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    grand_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class ERPDocumentLine(Base):
+    __tablename__ = "erp_document_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("erp_documents.id", ondelete="CASCADE"), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("erp_items.id"))
+    tax_code_id: Mapped[int | None] = mapped_column(ForeignKey("erp_tax_codes.id"), nullable=True)
+    description: Mapped[str] = mapped_column(String(250))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 3), default=0)
+    taxable_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+
+class ERPAccount(Base):
+    __tablename__ = "erp_accounts"
+    __table_args__ = (UniqueConstraint("organisation_id", "account_code", name="uq_erp_account_org_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    account_code: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str] = mapped_column(String(120))
+    account_type: Mapped[str] = mapped_column(String(20))
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+class ERPJournalEntry(Base):
+    __tablename__ = "erp_journal_entries"
+    __table_args__ = (UniqueConstraint("organisation_id", "entry_no", name="uq_erp_journal_org_no"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("erp_documents.id", ondelete="SET NULL"), nullable=True, unique=True)
+    entry_no: Mapped[str] = mapped_column(String(60))
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    narration: Mapped[str] = mapped_column(String(250))
+    posted_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class ERPJournalLine(Base):
+    __tablename__ = "erp_journal_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    journal_entry_id: Mapped[int] = mapped_column(ForeignKey("erp_journal_entries.id", ondelete="CASCADE"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("erp_accounts.id"))
+    debit: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    credit: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    party_id: Mapped[int | None] = mapped_column(ForeignKey("erp_parties.id"), nullable=True)
+
+class ERPStockLedger(Base):
+    __tablename__ = "erp_stock_ledger"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    facility_id: Mapped[int | None] = mapped_column(ForeignKey("facilities.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("erp_items.id"), index=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("erp_documents.id"), index=True)
+    movement_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity_in: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
+    quantity_out: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

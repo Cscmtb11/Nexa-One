@@ -121,3 +121,15 @@ def test_stock_adjustment_requires_supported_direction():
     with pytest.raises(ValidationError):
         StockAdjustmentIn(reference_no="ADJ-2",item_id=1,facility_id=1,direction="transfer",
             quantity="2",operation_date="2026-11-15",reason="Invalid direction")
+
+
+def test_stock_adjustment_rejects_negative_cost():
+    with pytest.raises(ValidationError):
+        StockAdjustmentIn(reference_no="ADJ-3",item_id=1,facility_id=1,direction="increase",
+            quantity="1",unit_cost="-0.01",operation_date="2026-11-15",reason="Stock count gain")
+
+
+def test_stock_transfer_rejects_missing_reason():
+    with pytest.raises(ValidationError):
+        StockTransferIn(reference_no="TR-2",item_id=1,source_facility_id=1,destination_facility_id=2,
+            quantity="1",operation_date="2026-11-15",reason="")

@@ -248,6 +248,9 @@ class ERPDocumentLine(Base):
     tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 3), default=0)
     taxable_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    cgst_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    sgst_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    igst_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
 
 class ERPAccount(Base):
@@ -293,4 +296,54 @@ class ERPStockLedger(Base):
     quantity_in: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
     quantity_out: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+# Phase 3.1: payments, allocations and bank reconciliation
+class ERPPayment(Base):
+    __tablename__ = "erp_payments"
+    __table_args__ = (UniqueConstraint("organisation_id", "payment_no", name="uq_erp_payment_org_no"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    party_id: Mapped[int] = mapped_column(ForeignKey("erp_parties.id"), index=True)
+    bank_account_id: Mapped[int | None] = mapped_column(ForeignKey("erp_bank_accounts.id"), nullable=True, index=True)
+    journal_entry_id: Mapped[int] = mapped_column(ForeignKey("erp_journal_entries.id"), unique=True)
+    payment_no: Mapped[str] = mapped_column(String(60))
+    payment_type: Mapped[str] = mapped_column(String(30))
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    method: Mapped[str] = mapped_column(String(30), default="bank")
+    reference: Mapped[str | None] = mapped_column(String(100))
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class ERPPaymentAllocation(Base):
+    __tablename__ = "erp_payment_allocations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("erp_payments.id", ondelete="CASCADE"), index=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("erp_documents.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+class ERPBankAccount(Base):
+    __tablename__ = "erp_bank_accounts"
+    __table_args__ = (UniqueConstraint("organisation_id", "account_code", name="uq_erp_bank_account_org_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    ledger_account_id: Mapped[int] = mapped_column(ForeignKey("erp_accounts.id"), unique=True)
+    account_code: Mapped[str] = mapped_column(String(30))
+    bank_name: Mapped[str] = mapped_column(String(120))
+    account_label: Mapped[str] = mapped_column(String(120))
+    account_last4: Mapped[str | None] = mapped_column(String(4))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+class ERPBankStatementLine(Base):
+    __tablename__ = "erp_bank_statement_lines"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    bank_account_id: Mapped[int] = mapped_column(ForeignKey("erp_bank_accounts.id"), index=True)
+    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    description: Mapped[str] = mapped_column(String(250))
+    reference: Mapped[str | None] = mapped_column(String(100))
+    direction: Mapped[str] = mapped_column(String(10))
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    reconciled_payment_id: Mapped[int | None] = mapped_column(ForeignKey("erp_payments.id"), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

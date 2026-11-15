@@ -109,7 +109,7 @@ class DocumentIn(BaseModel):
 
 
 class StockTransferIn(BaseModel):
-    reference_no: str = Field(min_length=1, max_length=60)
+    reference_no: str = Field(min_length=1, max_length=55)
     item_id: int
     source_facility_id: int
     destination_facility_id: int

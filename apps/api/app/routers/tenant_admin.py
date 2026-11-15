@@ -101,6 +101,10 @@ class InvitationCreate(BaseModel):
     role: str = "member"
 
 
+class MembershipRoleUpdate(BaseModel):
+    role: str
+
+
 class InvitationAccept(BaseModel):
     token: str = Field(min_length=32, max_length=128)
 
@@ -321,6 +325,43 @@ def accept_user_invitation(payload: InvitationAccept, user: User = Depends(curre
     db.add(AuditEvent(organisation_id=invitation.organisation_id, actor_user_id=user.id, action="user.invitation_accepted", resource_type="user_invitation", resource_id=str(invitation.id), detail=f"Accepted invitation for {user.email}"))
     db.commit()
     return {"accepted": True, "organisation_id": invitation.organisation_id, "role": invitation.role}
+
+
+@router.put("/users/{user_id}/role")
+def update_user_role(user_id: int, payload: MembershipRoleUpdate, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
+    if not _has_permission(db, membership, "user.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: user.manage")
+    role = payload.role.strip().lower()
+    if role not in ALLOWED_ROLES:
+        raise HTTPException(status_code=422, detail="Role is not assignable")
+    if role == "admin" and membership.role != "owner":
+        raise HTTPException(status_code=403, detail="Only the organisation owner can assign admin")
+    target = db.query(Membership).filter_by(user_id=user_id, organisation_id=membership.organisation_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Organisation membership not found")
+    if target.role == "owner":
+        raise HTTPException(status_code=409, detail="The organisation owner role cannot be changed here")
+    old_role = target.role
+    target.role = role
+    _audit(db, membership, "user.role_updated", "membership", str(target.id), f"Changed user {user_id} role from {old_role} to {role}")
+    db.commit()
+    return {"user_id": user_id, "role": role}
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def remove_organisation_user(user_id: int, membership: Membership = Depends(organisation_membership), db: Session = Depends(get_db)):
+    if not _has_permission(db, membership, "user.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: user.manage")
+    target = db.query(Membership).filter_by(user_id=user_id, organisation_id=membership.organisation_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Organisation membership not found")
+    if target.role == "owner":
+        raise HTTPException(status_code=409, detail="The organisation owner cannot be removed")
+    if target.user_id == membership.user_id and membership.role == "owner":
+        raise HTTPException(status_code=409, detail="The organisation owner cannot remove their own membership")
+    _audit(db, membership, "user.removed", "membership", str(target.id), f"Removed user {user_id} from organisation")
+    db.delete(target)
+    db.commit()
 
 
 @router.get("/permissions")

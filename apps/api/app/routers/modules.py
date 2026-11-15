@@ -91,9 +91,6 @@ def disable_module(
     membership: Membership = Depends(require_org_permission("org.manage")),
     db: Session = Depends(get_db),
 ):
-    if membership.role not in {"owner", "admin", "platform_admin"}:
-        raise HTTPException(status_code=403, detail="Organisation admin role required")
-
     module = db.query(ModuleCatalog).filter_by(key=module_key, is_active=True).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")

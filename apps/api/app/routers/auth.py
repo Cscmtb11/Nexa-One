@@ -53,6 +53,8 @@ def _seed_organisation_defaults(db: Session, organisation_id: int):
         ("1000", "Cash & Bank", "asset"), ("1100", "Accounts Receivable", "asset"),
         ("1200", "Inventory", "asset"), ("1300", "Input GST", "asset"),
         ("2000", "Accounts Payable", "liability"), ("2100", "Output GST", "liability"),
+        ("2110", "Output CGST", "liability"), ("2120", "Output SGST", "liability"), ("2130", "Output IGST", "liability"),
+        ("1310", "Input CGST", "asset"), ("1320", "Input SGST", "asset"), ("1330", "Input IGST", "asset"),
         ("4000", "Sales Revenue", "income"), ("5000", "Purchases / Cost of Goods", "expense"),
     ]
     for code, name, account_type in accounts:

@@ -19,6 +19,17 @@ CENT = Decimal("0.01")
 def money(value):
     return Decimal(value).quantize(CENT, rounding=ROUND_HALF_UP)
 
+def split_gst_components(tax_amount, seller_state, place_state):
+    total = money(tax_amount)
+    if total == 0:
+        return Decimal("0.00"), Decimal("0.00"), Decimal("0.00")
+    if not seller_state or not place_state:
+        raise ValueError("Seller GST state and place-of-supply state are required")
+    if seller_state == place_state:
+        cgst = money(total / Decimal("2"))
+        return cgst, money(total - cgst), Decimal("0.00")
+    return Decimal("0.00"), Decimal("0.00"), total
+
 class ItemIn(BaseModel):
     item_code: str = Field(min_length=1, max_length=50)
     name: str = Field(min_length=2, max_length=200)
@@ -192,16 +203,11 @@ def create_document(p: DocumentIn,m: Membership=Depends(require_org_permission("
         if discount>gross: db.rollback();raise HTTPException(422,detail="Line discount cannot exceed its gross amount")
         taxable=money(gross-discount);rate=Decimal("0") if not tax or tax.is_exempt else Decimal(tax.rate)
         tax_amount=money(taxable*rate/Decimal("100"))
-        cgst=sgst=igst=Decimal("0.00")
-        if tax_amount:
-            if not seller_state or not place_state:
-                db.rollback()
-                raise HTTPException(422,detail="Configure a primary GST registration state and party/place-of-supply state before applying GST")
-            if seller_state==place_state:
-                cgst=money(tax_amount/Decimal("2"))
-                sgst=money(tax_amount-cgst)
-            else:
-                igst=tax_amount
+        try:
+            cgst,sgst,igst=split_gst_components(tax_amount,seller_state,place_state)
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(422,detail=str(exc))
         db.add(ERPDocumentLine(document_id=doc.id,item_id=item.id,tax_code_id=tax.id if tax else None,
             description=line.description or item.name,quantity=line.quantity,unit_price=line.unit_price,
             discount_amount=discount,tax_rate=rate,taxable_amount=taxable,tax_amount=tax_amount,

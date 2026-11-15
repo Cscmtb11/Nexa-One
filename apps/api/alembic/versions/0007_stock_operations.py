@@ -39,8 +39,6 @@ def upgrade():
         sa.ForeignKey("erp_stock_operations.id"), nullable=True))
     op.create_index("ix_erp_stock_ledger_stock_operation_id", "erp_stock_ledger", ["stock_operation_id"])
 
-    for column in ["organisation_id", "item_id", "source_facility_id", "destination_facility_id"]:
-        op.create_index(f"ix_erp_stock_operations_{column}", "erp_stock_operations", [column])
 
     op.execute("""
       INSERT INTO erp_accounts (organisation_id,account_code,name,account_type,is_system)

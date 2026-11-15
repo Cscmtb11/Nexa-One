@@ -364,6 +364,11 @@ def inventory_valuation(facility_id:int|None=None,m:Membership=Depends(require_o
     return result
 
 
+
+@router.get("/facilities")
+def list_erp_facilities(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):
+    return db.query(Facility).filter_by(organisation_id=m.organisation_id,is_active=True).order_by(Facility.name).all()
+
 @router.get("/stock-operations")
 def list_stock_operations(m:Membership=Depends(require_org_permission("erp.read")),db:Session=Depends(get_db)):
     return db.query(ERPStockOperation).filter_by(organisation_id=m.organisation_id).order_by(

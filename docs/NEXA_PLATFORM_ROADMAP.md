@@ -74,10 +74,18 @@ Phase 3.1 — payments and India GST foundations (implemented in phase-3-1 branc
 Remaining before production accounting use:
 - GSTIN e-invoice/IRN integration, live HSN/SAC and rate validation, GST return generation and reconciliation with portal data.
 - Automated bank statement file import (CSV/OFX/API), opening balances, fees, interest, reversals and unmatched transaction workflow.
-- Weighted-average/FIFO valuation, COGS posting, stock transfers, adjustments, batch/serial and expiry.
+- Stock transfers, adjustments, batch/serial and expiry. Phase 3.3 adds FIFO issue costing, COGS journals and FIFO inventory valuation; legacy stock history should be reviewed before relying on historical values.
 - Purchase orders, sales orders, approval workflows, attachments, credit/debit notes and document numbering sequences.
 - Financial statements, trial balance, receivables/payables ageing, advances settlement and period close controls.
 - External accountant review and regulatory validation before live filing or statutory use.
+
+Phase 3.3 — inventory costing foundation (implementation branch):
+- FIFO cost layers are reconstructed from the facility/item stock ledger in movement-date order.
+- Sales posting consumes oldest available purchase layers and posts COGS (debit) against inventory (credit) in the same balanced journal.
+- Purchase stock receipts use net line taxable value after discounts as their FIFO unit cost.
+- Inventory valuation endpoint reports FIFO quantity and value by item/facility.
+- Backdated stock postings are blocked when they would rewrite an existing FIFO sequence; inconsistent legacy stock history is rejected for reconciliation.
+- FIFO is not a substitute for opening-stock migration or accountant-approved valuation review. GST input tax, freight/landed cost, returns and stock adjustments require later dedicated workflows.
 
 ### Phase 4 — Healthcare
 - Patient master index, registration, consent and appointments.

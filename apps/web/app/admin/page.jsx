@@ -29,6 +29,7 @@ export default function TenantAdminPage(){
   const [gst,setGst]=useState(emptyGst);
   const [year,setYear]=useState(emptyYear);
   const [invite,setInvite]=useState({email:"",role:"member"});
+  const [invitationToken,setInvitationToken]=useState("");
   const [setting,setSetting]=useState({key:"timezone",value:"Asia/Kolkata"});
   const [message,setMessage]=useState("");
   const [error,setError]=useState("");
@@ -94,7 +95,7 @@ export default function TenantAdminPage(){
 
   async function submit(path,payload,success,reset){
     setBusy(true);setError("");setMessage("");
-    try{await request(path,{method:"POST",body:JSON.stringify(payload)});setMessage(success);if(reset)reset();await loadData();}
+    try{const result=await request(path,{method:"POST",body:JSON.stringify(payload)});if(result.invitation_token)setInvitationToken(result.invitation_token);setMessage(success);if(reset)reset();await loadData();}
     catch(e){setError(e.message);}
     finally{setBusy(false);}
   }
@@ -143,7 +144,7 @@ export default function TenantAdminPage(){
       <Field label="User email"><input type="email" value={invite.email} onChange={e=>setInvite({...invite,email:e.target.value})} required/></Field>
       <Field label="Role"><select value={invite.role} onChange={e=>setInvite({...invite,role:e.target.value})}>{["member","manager","accountant","clinician","technician","admin"].map(r=><option key={r}>{r}</option>)}</select></Field>
       <button className="admin-primary" disabled={busy}>Create invitation</button>
-    </form><div className="admin-note">Only the organisation owner can invite an admin or change role permissions. Invitation tokens expire after seven days.</div></section><section className="admin-card"><h2>Organisation users</h2><DataGrid columns={[{key:"full_name",label:"Name"},{key:"email",label:"Email"},{key:"role",label:"Role"},{key:"is_active",label:"Active"}]} rows={data.users}/></section></div>}
+    </form>{invitationToken&&<div className="admin-note"><b>One-time invitation token</b><p>Share this token privately with the invited user. It is shown only now.</p><code>{invitationToken}</code></div>}<div className="admin-note">Only the organisation owner can invite an admin or change role permissions. Invitation tokens expire after seven days.</div></section><section className="admin-card"><h2>Organisation users</h2><DataGrid columns={[{key:"full_name",label:"Name"},{key:"email",label:"Email"},{key:"role",label:"Role"},{key:"is_active",label:"Active"}]} rows={data.users}/></section></div>}
     {active==="Organisation settings"&&<div className="admin-columns"><section className="admin-card"><h2>Update setting</h2><p>Settings are scoped to the selected organisation and every change is audited.</p><form className="admin-form" onSubmit={e=>{e.preventDefault();setBusy(true);setError("");setMessage("");request("/v1/tenant/settings/"+setting.key,{method:"PUT",body:JSON.stringify({value:setting.value})}).then(()=>{setMessage("Organisation setting saved.");loadData();}).catch(e=>setError(e.message)).finally(()=>setBusy(false));}}>
       <Field label="Setting"><select value={setting.key} onChange={e=>setSetting({...setting,key:e.target.value,value:data.settings[e.target.value]||""})}>{["timezone","locale","currency","date_format","financial_year_start_month","invoice_prefix","receipt_prefix","default_gst_registration_id","tax_mode","gst_exempt","organisation_display_name"].map(k=><option key={k}>{k}</option>)}</select></Field>
       <Field label="Value"><input value={setting.value} onChange={e=>setSetting({...setting,value:e.target.value})} required/></Field>

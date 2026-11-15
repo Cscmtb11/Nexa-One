@@ -31,3 +31,28 @@ def organisation_membership(
     if membership:
         return membership
     return Membership(user_id=user.id, organisation_id=x_org_id, role="platform_admin")
+
+
+def require_org_permission(permission_code: str):
+    """Resolve a permission against the active organisation and the member's role."""
+    def _require(
+        membership: Membership = Depends(organisation_membership),
+        db: Session = Depends(get_db),
+    ) -> Membership:
+        if membership.role == "platform_admin":
+            return membership
+        from .models import Permission, RolePermission
+        allowed = (
+            db.query(RolePermission.id)
+            .join(Permission, Permission.id == RolePermission.permission_id)
+            .filter(
+                RolePermission.organisation_id == membership.organisation_id,
+                RolePermission.role == membership.role,
+                Permission.code == permission_code,
+            )
+            .first()
+        )
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing permission: {permission_code}")
+        return membership
+    return _require

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import Membership, ModuleCatalog, Organisation, OrganisationModule, Permission, RolePermission, User
+from ..models import ERPAccount, ERPTaxCode, Membership, ModuleCatalog, Organisation, OrganisationModule, Permission, RolePermission, User
 from ..schemas import LoginRequest, RegisterRequest, TokenResponse
 from ..security import create_access_token, hash_password, verify_password
 
@@ -45,6 +45,22 @@ def _seed_organisation_defaults(db: Session, organisation_id: int):
             permission = by_code.get(code)
             if permission:
                 db.add(RolePermission(organisation_id=organisation_id, role=role, permission_id=permission.id))
+
+    # Provision the shared ERP chart of accounts and GST rate catalogue for new tenants.
+    accounts = [
+        ("1000", "Cash & Bank", "asset"), ("1100", "Accounts Receivable", "asset"),
+        ("1200", "Inventory", "asset"), ("1300", "Input GST", "asset"),
+        ("2000", "Accounts Payable", "liability"), ("2100", "Output GST", "liability"),
+        ("4000", "Sales Revenue", "income"), ("5000", "Purchases / Cost of Goods", "expense"),
+    ]
+    for code, name, account_type in accounts:
+        db.add(ERPAccount(organisation_id=organisation_id, account_code=code, name=name, account_type=account_type, is_system=True))
+    tax_codes = [
+        ("GST0", "Exempt / Nil rated", 0, True), ("GST5", "GST 5%", 5, False),
+        ("GST12", "GST 12%", 12, False), ("GST18", "GST 18%", 18, False), ("GST28", "GST 28%", 28, False),
+    ]
+    for code, name, rate, exempt in tax_codes:
+        db.add(ERPTaxCode(organisation_id=organisation_id, code=code, name=name, rate=rate, is_exempt=exempt))
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)

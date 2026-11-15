@@ -67,3 +67,24 @@ class AuditEvent(Base):
     resource_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class ModuleCatalog(Base):
+    __tablename__ = "module_catalog"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    industry: Mapped[str] = mapped_column(String(80), index=True)
+    description: Mapped[str] = mapped_column(Text)
+    is_core: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class OrganisationModule(Base):
+    __tablename__ = "organisation_modules"
+    __table_args__ = (UniqueConstraint("organisation_id", "module_id", name="uq_org_module"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
+    module_id: Mapped[int] = mapped_column(ForeignKey("module_catalog.id", ondelete="CASCADE"), index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

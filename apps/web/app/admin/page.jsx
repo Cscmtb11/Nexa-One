@@ -106,7 +106,9 @@ export default function TenantAdminPage(){
     finally{setBusy(false);}
   }
 
-  useEffect(()=>{setSelectedPermissions(permissionData.roles?.[permissionRole] || []);},[permissionRole,permissionData]);\n\n  const currentOrg=useMemo(()=>organisations.find(o=>String(o.id)===String(orgId)),[organisations,orgId]);
+  useEffect(()=>{setSelectedPermissions(permissionData.roles?.[permissionRole] || []);},[permissionRole,permissionData]);
+
+  const currentOrg=useMemo(()=>organisations.find(o=>String(o.id)===String(orgId)),[organisations,orgId]);
 
   if(!token || !ready) return <main className="admin-login-shell"><form className="admin-login" onSubmit={login}><div className="admin-brand">NEXA <span>SPRINGNEXA PRIVATE LIMITED</span></div><h1>Tenant administration</h1><p>Sign in with your NEXA account to manage organisation registrations, branches and access.</p><Field label="Account email"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username"/></Field><Field label="Password"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required autoComplete="current-password"/></Field>{error&&<div className="admin-alert error">{error}</div>}<button className="admin-primary" disabled={busy}>{busy?"Signing in…":"Sign in"}</button><a href="/" className="admin-back">← Back to NEXA workspace</a></form></main>;
 
